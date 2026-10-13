@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Name": "Orca Notifier",
+        "Description": "Plasma widget placeholder for Orca Notifier",
+        "Icon": "dialog-information",
+        "Id": "org.kde.plasma.orca-notifier",
+        "Version": "0.1.0",
+        "Author": "holty",
+        "License": "GPL-3.0-or-later",
+        "Category": "Utilities"
+    },
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-DefaultSize": "200,100"
+}
