@@ -10,8 +10,11 @@
         "Category": "System Information",
         "Website": "https://github.com/holty07/plasma-widgets",
         "Keywords": ["orca", "agents", "notifier", "monitor", "system"],
-        "Dependencies": []
+        "Dependencies": [],
+        "ServiceTypes": ["Plasma/Applet"]
     },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0",
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-MainScript": "ui/main.qml",
     "X-Plasma-DefaultSize": "200,100"
