@@ -1,13 +1,16 @@
 {
     "KPlugin": {
         "Name": "Orca Notifier",
-        "Description": "Plasma widget placeholder for Orca Notifier",
-        "Icon": "dialog-information",
+        "Description": "Displays current Orca agents: active, idle, and waiting for input",
+        "Icon": "preferences-system-monitor",
         "Id": "org.kde.plasma.orca-notifier",
-        "Version": "0.1.0",
+        "Version": "1.0.0",
         "Author": "holty",
         "License": "GPL-3.0-or-later",
-        "Category": "Utilities"
+        "Category": "System Information",
+        "Website": "https://github.com/holty07/plasma-widgets",
+        "Keywords": ["orca", "agents", "notifier", "monitor", "system"],
+        "Dependencies": []
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-MainScript": "ui/main.qml",
