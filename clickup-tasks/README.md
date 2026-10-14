@@ -22,7 +22,7 @@
 # 4. Install the applet
 #    - Symlink the folder into your Plasma applet directory:
 #        ln -s "$PWD" ~/.local/share/plasma/plasmoids/io.github.holty07.clickuptasks
-#    - Reload: setsid plasmashell --replace &
+#    - Reload: systemctl --user restart plasma-plasmashell.service
 #
 # 5. Test it as Plasma would
 #    - The widget runs: python3 '<package>/contents/code/clickup.py' every 5 min

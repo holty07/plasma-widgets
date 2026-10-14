@@ -26,7 +26,7 @@ Installation pattern (example):
 
 ```bash
 ln -s "$PWD/<widget-folder>" ~/.local/share/plasma/plasmoids/<plugin-id>
-setsid plasmashell --replace &
+systemctl --user restart plasma-plasmashell.service
 ```
 
 See each widget's own README for config details.
