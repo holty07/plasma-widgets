@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "holty07@gmail.com",
+                "Name": "holty07"
+            }
+        ],
+        "Category": "Date and Time",
+        "Description": "Today's agenda from Google Calendar ICS feeds — Catppuccin Mocha",
+        "Icon": "view-calendar-agenda",
+        "Id": "io.github.holty07.agenda",
+        "License": "GPL-2.0-or-later",
+        "Name": "Agenda",
+        "Version": "1.0.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

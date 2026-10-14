@@ -33,3 +33,5 @@ Thumbs.db
 
 # Local config
 .local/
+# Private calendar feed URLs
+agenda/contents/code/feeds.js
