@@ -1,0 +1,5 @@
+# Local ClickUp token + list IDs. Never commit this file.
+# Copy config.example.json to config.json and fill it in.
+config.json
+__pycache__/
+*.pyc
