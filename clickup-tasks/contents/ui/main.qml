@@ -23,7 +23,6 @@ PlasmoidItem {
     // Last known counts; -1 until the first fetch succeeded.
     property int countOverdue: -1
     property int countOpen: -1
-    property int countDone: -1
     property int countTotal: -1
     property string stateError: ""
     property var taskList: []
@@ -35,17 +34,15 @@ PlasmoidItem {
 
     readonly property int shownOverdue: Math.max(0, root.countOverdue)
     readonly property int shownOpen: Math.max(0, root.countOpen)
-    readonly property int shownDone: Math.max(0, root.countDone)
     readonly property int shownTotal: Math.max(0, root.countTotal)
 
     toolTipMainText: i18n("ClickUp tasks")
     toolTipSubText: root.stateError !== "" ? root.stateError
                   : !root.loaded ? i18n("Fetching tasks…")
-                  : i18n("%1 overdue · %2 open · %3 done",
-                         root.shownOverdue, root.shownOpen, root.shownDone)
+                  : i18n("%1 overdue · %2 open", root.shownOverdue, root.shownOpen)
 
     // One-shot runs: connect, read the JSON payload, disconnect. The helper
-    // prints { received_at, ok, counts:{overdue,open,done,total}, tasks:[...],
+    // prints { received_at, ok, counts:{overdue,open,total}, tasks:[...],
     // error } on stdout even when it fails.
     Plasma5Support.DataSource {
         id: fetchSource
@@ -71,7 +68,6 @@ PlasmoidItem {
             root.taskList = Array.isArray(payload.tasks) ? payload.tasks : []
             root.countOverdue = payload.counts.overdue
             root.countOpen = payload.counts.open
-            root.countDone = payload.counts.done
             root.countTotal = payload.counts.total
             root.hasData = true
         }
@@ -96,8 +92,15 @@ PlasmoidItem {
 
     function groupColor(bucket) {
         return bucket === "overdue" ? "#f38ba8"
-             : bucket === "open"    ? "#f9e2af"
-             : "#a6e3a1"
+             : "#f9e2af"
+    }
+
+    function priorityColor(priority) {
+        return priority === "urgent" ? "#f38ba8"
+             : priority === "high"   ? "#f9e2af"
+             : priority === "normal" ? "#cba6f7"
+             : priority === "low"    ? "#9399b2"
+             : "#000000"
     }
 
     function formatDue(ms) {
@@ -166,8 +169,7 @@ PlasmoidItem {
             Repeater {
                 model: [
                     { label: i18n("Overdue"), bucket: "overdue", count: root.shownOverdue },
-                    { label: i18n("Open"),    bucket: "open",    count: root.shownOpen },
-                    { label: i18n("Done"),    bucket: "done",    count: root.shownDone }
+                    { label: i18n("Open"),    bucket: "open",    count: root.shownOpen }
                 ]
                 delegate: ColumnLayout {
                     required property var modelData
@@ -213,7 +215,7 @@ PlasmoidItem {
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.stateError === "" && (!root.loaded || root.taskList.length === 0)
-            text: !root.loaded ? i18n("Fetching tasks…") : i18n("Nothing assigned to you")
+            text: !root.loaded ? i18n("Fetching tasks…") : i18n("No active tasks")
             opacity: 0.7
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
@@ -254,7 +256,7 @@ PlasmoidItem {
                             Layout.fillHeight: true
                             implicitWidth: 3
                             radius: 1
-                            color: root.groupColor(taskRow.modelData.bucket)
+                            color: root.priorityColor(taskRow.modelData.priority)
                         }
 
                         ColumnLayout {
@@ -271,7 +273,8 @@ PlasmoidItem {
                             }
                             PlasmaComponents.Label {
                                 Layout.fillWidth: true
-                                text: [taskRow.modelData.status,
+                                text: [taskRow.modelData.priority,
+                                       taskRow.modelData.status,
                                        taskRow.modelData.list,
                                        root.formatDue(taskRow.modelData.due)]
                                       .filter(function(s) { return !!s }).join(" · ")

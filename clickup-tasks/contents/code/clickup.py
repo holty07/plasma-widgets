@@ -24,12 +24,14 @@ import json
 import os
 import sys
 import time
+import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
 
 BASE = "https://api.clickup.com/api/v2"
 PAGE_SIZE = 100  # fixed by ClickUp for the team task endpoint
+MAX_PAGES = 50  # safety stop; counts need every page, not just max_tasks
 
 
 def log(msg):
@@ -76,8 +78,12 @@ def api_get(token, path, params=None):
         return json.loads(response.read().decode("utf-8"))
 
 
-def fetch_team_tasks(token, team_id, user_id, list_ids, max_tasks):
-    """Page through open tasks in one Workspace until last_page or the cap."""
+def fetch_team_tasks(token, team_id, user_id, list_ids):
+    """Page through open tasks in one Workspace until last_page.
+
+    Fetch every page even past max_tasks: the counts must cover all tasks,
+    only the returned list is capped.
+    """
     params = {
         "include_closed": "false",
         "subtasks": "true",
@@ -90,7 +96,7 @@ def fetch_team_tasks(token, team_id, user_id, list_ids, max_tasks):
 
     tasks = []
     page = 0
-    while len(tasks) < max_tasks:
+    while page < MAX_PAGES:
         payload = api_get(token, f"/team/{team_id}/task", dict(params, page=page))
         batch = payload.get("tasks", [])
         tasks.extend(batch)
@@ -100,29 +106,48 @@ def fetch_team_tasks(token, team_id, user_id, list_ids, max_tasks):
     return tasks
 
 
-def due_ms(task):
-    """ClickUp returns due_date as a millisecond epoch string (or null)."""
-    due = task.get("due_date")
+def date_ms(task, field):
+    """ClickUp returns due_date/start_date as a millisecond epoch string (or null)."""
+    value = task.get(field)
     try:
-        return int(due) if due else None
+        return int(value) if value else None
     except (TypeError, ValueError):
         return None
 
 
-def classify(status, due, now):
-    """Map a ClickUp status + due date to a widget bucket."""
-    if (status.get("type") or "").lower() in ("done", "closed"):
-        return "done"
-    if due and due < now:
+def day(ms):
+    return datetime.date.fromtimestamp(ms / 1000) if ms else None
+
+
+def is_active(task, today):
+    """Only active tasks belong in the widget: started already, or due today
+    or earlier. Unscheduled tasks and ones that start (or, with no start date,
+    fall due) after today are left out."""
+    start = day(date_ms(task, "start_date"))
+    due = day(date_ms(task, "due_date"))
+    return bool((start and start <= today) or (due and due <= today))
+
+
+def is_finished(task):
+    """include_closed=false drops "closed" statuses but not "done"-type ones
+    (e.g. "completed"), so filter those out here."""
+    return ((task.get("status") or {}).get("type") or "").lower() in ("done", "closed")
+
+
+def classify(due, today):
+    """Overdue only once the due *day* has passed. ClickUp stores date-only
+    due dates as 04:00 local time, so comparing against now would flag
+    tasks due today as overdue from 4am."""
+    if due and day(due) < today:
         return "overdue"
     return "open"
 
 
-def to_dict(task, now):
+def to_dict(task, today):
     """Flatten one ClickUp task into a compact, stable shape."""
     status = task.get("status") or {}
     priority = task.get("priority") or {}
-    due = due_ms(task)
+    due = date_ms(task, "due_date")
     return {
         "id": task.get("id"),
         "name": task.get("name", ""),
@@ -130,12 +155,15 @@ def to_dict(task, now):
         "status": status.get("status", ""),
         "status_color": status.get("color") or "#89b4fa",
         "priority": priority.get("priority", ""),
+        # ClickUp orderindex: 1 urgent .. 4 low; unset sorts after low.
+        "priority_rank": int(priority.get("orderindex") or 5),
         "assignee": ", ".join(
             a.get("username") for a in task.get("assignees") or [] if a.get("username")
         ),
         "due": due,
+        "start": date_ms(task, "start_date"),
         "url": task.get("url", ""),
-        "bucket": classify(status, due, now),
+        "bucket": classify(due, today),
     }
 
 
@@ -148,7 +176,7 @@ def main(argv):
     result = {
         "received_at": now_ms(),
         "ok": False,
-        "counts": {"overdue": 0, "open": 0, "done": 0, "total": 0},
+        "counts": {"overdue": 0, "open": 0, "total": 0},
         "tasks": [],
         "error": "",
     }
@@ -172,13 +200,14 @@ def main(argv):
     except Exception as exc:  # noqa: BLE001 - offline, DNS, etc.
         return fail(f"Cannot reach ClickUp: {exc}")
 
-    now = now_ms()
+    today = datetime.date.today()
     all_tasks = []
     errors = []
     for team in teams:
         try:
-            raw = fetch_team_tasks(token, team["id"], user_id, cfg["list_ids"], cfg["max_tasks"])
-            all_tasks.extend(to_dict(t, now) for t in raw)
+            raw = fetch_team_tasks(token, team["id"], user_id, cfg["list_ids"])
+            all_tasks.extend(to_dict(t, today) for t in raw
+                             if is_active(t, today) and not is_finished(t))
         except urllib.error.HTTPError as exc:
             errors.append(f"{team.get('name', team['id'])}: HTTP {exc.code}")
         except Exception as exc:  # noqa: BLE001 - report any fetch failure
@@ -188,11 +217,11 @@ def main(argv):
     if errors and not all_tasks:
         return fail("; ".join(errors))
 
-    # Overdue first, then open, then done; soonest due date first in each.
-    order = {"overdue": 0, "open": 1, "done": 2}
-    all_tasks.sort(key=lambda t: (order[t["bucket"]], t["due"] or float("inf")))
+    # Highest priority first, then soonest due date (start date when a task
+    # has no due date).
+    all_tasks.sort(key=lambda t: (t["priority_rank"], t["due"] or t["start"]))
 
-    counts = {"overdue": 0, "open": 0, "done": 0}
+    counts = {"overdue": 0, "open": 0}
     for task in all_tasks:
         counts[task["bucket"]] += 1
     result["counts"] = dict(counts, total=len(all_tasks))
