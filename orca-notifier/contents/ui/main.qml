@@ -20,6 +20,8 @@ PlasmoidItem {
     property var activity: ({})
     // paneKey -> terminal handle, from `orca terminal list`.
     property var paneHandles: ({})
+    // paneKey -> Orca tab title, with the agent's spinner glyph removed.
+    property var paneTitles: ({})
     readonly property var workingPanes: root.agentList
         .filter(function(entry) { return entry.group === "running" })
         .map(function(entry) { return entry.paneKey })
@@ -55,7 +57,7 @@ PlasmoidItem {
         id: stateSource
         engine: "executable"
         connectedSources: [root.orcaCommand]
-        interval: 3000
+        interval: 5000
         onNewData: function(sourceName, data) {
             root.now = Date.now()
             var stdout = data["stdout"] || ""
@@ -128,13 +130,13 @@ PlasmoidItem {
         }
     }
 
-    // Maps agent panes to terminal handles, only while something is working.
+    // Maps agent panes to terminal handles and tab titles.
     Plasma5Support.DataSource {
         id: terminalListSource
         engine: "executable"
-        connectedSources: root.workingPanes.length > 0
-                          ? [root.orcaCli + " terminal list --json"] : []
-        interval: 3000
+        connectedSources: [root.orcaCli + " terminal list --json"]
+        // Titles rarely change, and each CLI call starts the full Orca binary.
+        interval: 15000
         onNewData: function(sourceName, data) {
             if (data["exit code"] !== 0) {
                 return
@@ -143,11 +145,20 @@ PlasmoidItem {
                 var payload = JSON.parse(data["stdout"] || "")
                 var terminals = (payload.result || payload).terminals || []
                 var handles = {}
+                var titles = {}
                 for (var i = 0; i < terminals.length; ++i) {
                     var t = terminals[i]
-                    handles[t.tabId + ":" + t.leafId] = t.handle
+                    var pane = t.tabId + ":" + t.leafId
+                    handles[pane] = t.handle
+                    // "✳ Claude usage widget" -> "Claude usage widget". Titles
+                    // that are just a path or command aren't worth showing.
+                    var title = ("" + (t.title || "")).replace(/^[^\w~\/]+/, "").trim()
+                    if (title !== "" && !/^[~\/]/.test(title)) {
+                        titles[pane] = title
+                    }
                 }
                 root.paneHandles = handles
+                root.paneTitles = titles
             } catch (e) {
             }
         }
@@ -160,7 +171,7 @@ PlasmoidItem {
         connectedSources: root.workingPanes
             .filter(function(pane) { return root.paneHandles[pane] !== undefined })
             .map(function(pane) { return root.screenCommand(pane) })
-        interval: 3000
+        interval: 5000
         onNewData: function(sourceName, data) {
             var pane = sourceName.split(" #")[1]
             var verb = ""
@@ -368,7 +379,7 @@ PlasmoidItem {
             ListView {
                 model: root.agentList
                 clip: true
-                spacing: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.largeSpacing * 1.5
 
                 delegate: RowLayout {
                     required property var modelData
@@ -406,13 +417,15 @@ PlasmoidItem {
 
                             PlasmaComponents.Label {
                                 Layout.fillWidth: true
-                                text: modelData.place
+                                text: root.paneTitles[modelData.paneKey] || modelData.place
                                 elide: Text.ElideRight
                                 font.weight: Font.DemiBold
-                                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
+                                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.05
                             }
                             PlasmaComponents.Label {
-                                text: root.ago(modelData.since)
+                                // The repo moves here once the tab title takes the bold line.
+                                text: (root.paneTitles[modelData.paneKey] ? modelData.place + " · " : "")
+                                      + root.ago(modelData.since)
                                 opacity: 0.6
                                 font: Kirigami.Theme.smallFont
                             }
