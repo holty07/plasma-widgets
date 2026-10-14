@@ -306,6 +306,7 @@ PlasmoidItem {
         case "copilot":     return "\uec1e"    // cod-copilot
         case "cursor":      return "\uec5c"    // cod-cursor
         case "opencode":    return "\uebc4"    // cod-terminal_cmd
+        case "hermes":      return "\udb86\udc6e"    // md-horse_variant_fast (U+F186E)
         default:            return "\uec20"    // cod-robot
         }
     }
