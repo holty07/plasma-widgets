@@ -92,24 +92,33 @@ PlasmoidItem {
         spacing: Math.round(0.5 * PlasmaCore.Units.smallSpacing)
 
         Rectangle {
-            implicitWidth: PlasmaCore.Units.smallSpacing * 2
-            implicitHeight: PlasmaCore.Units.smallSpacing * 2
+            implicitWidth: PlasmaCore.Units.smallSpacing * 3
+            implicitHeight: PlasmaCore.Units.smallSpacing * 3
             radius: width / 2
             color: pair.dotColor
             visible: pair.available
-            opacity: 0.9
+            opacity: 0.95
 
             SequentialAnimation on opacity {
                 running: pair.pulse
                 loops: Animation.Infinite
-                NumberAnimation { to: 0.3; duration: 700; easing.type: Easing.InOutQuad }
-                NumberAnimation { to: 0.9; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { to: 0.4; duration: 700; easing.type: Easing.InOutQuad }
+                NumberAnimation { to: 0.95; duration: 700; easing.type: Easing.InOutQuad }
             }
         }
 
         PlasmaComponents.Label {
             text: pair.available ? pair.count : "…"
-            color: PlasmaCore.Theme.textColor
+            color: PlasmaCore.Theme.backgroundColor
+            font.bold: true
+            verticalAlignment: Text.AlignVCenter
+
+            // Solid background so the dot color reads clearly on both dark and
+            // light panels.
+            backgroundColor: pair.dotColor
+            border.color: PlasmaCore.Theme.defaultFont.color
+            border.width: 1
+            radius: PlasmaCore.Units.smallSpacing
         }
     }
 
