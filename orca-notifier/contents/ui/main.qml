@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.components as PlasmaComponents
+import org.kde.kirigami as Kirigami
 import org.kde.plasma.plasma5support as Plasma5Support
 
 PlasmoidItem {
@@ -89,11 +90,11 @@ PlasmoidItem {
         property int count: 0
         property bool available: true
 
-        spacing: Math.round(0.5 * PlasmaCore.Units.smallSpacing)
+        spacing: Math.round(0.5 * Kirigami.Units.smallSpacing)
 
         Rectangle {
-            implicitWidth: PlasmaCore.Units.smallSpacing * 3
-            implicitHeight: PlasmaCore.Units.smallSpacing * 3
+            implicitWidth: Kirigami.Units.smallSpacing * 3
+            implicitHeight: Kirigami.Units.smallSpacing * 3
             radius: width / 2
             color: pair.dotColor
             visible: pair.available
@@ -107,23 +108,29 @@ PlasmoidItem {
             }
         }
 
-        PlasmaComponents.Label {
-            text: pair.available ? pair.count : "…"
-            color: PlasmaCore.Theme.backgroundColor
-            font.bold: true
-            verticalAlignment: Text.AlignVCenter
-
-            // Solid background so the dot color reads clearly on both dark and
-            // light panels.
-            backgroundColor: pair.dotColor
-            border.color: PlasmaCore.Theme.defaultFont.color
+        // Solid background so the dot color reads clearly on both dark and
+        // light panels.
+        Rectangle {
+            implicitWidth: Math.max(countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2, implicitHeight)
+            implicitHeight: countLabel.implicitHeight
+            color: pair.dotColor
+            border.color: Kirigami.Theme.textColor
             border.width: 1
-            radius: PlasmaCore.Units.smallSpacing
+            radius: Kirigami.Units.smallSpacing
+
+            PlasmaComponents.Label {
+                id: countLabel
+                anchors.centerIn: parent
+                text: pair.available ? pair.count : "…"
+                // Dark text: the badge colors are all light pastels.
+                color: "#1e1e2e"
+                font.bold: true
+            }
         }
     }
 
     compactRepresentation: RowLayout {
-        spacing: PlasmaCore.Units.smallSpacing
+        spacing: Kirigami.Units.smallSpacing
 
         DotAndCount {
             dotColor: "#89b4fa"            // blue  - in progress
@@ -148,11 +155,11 @@ PlasmoidItem {
         // Simple centered summary in the popup.
         ColumnLayout {
             anchors.centerIn: parent
-            spacing: PlasmaCore.Units.smallSpacing
+            spacing: Kirigami.Units.smallSpacing
 
             RowLayout {
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: PlasmaCore.Units.largeSpacing
+                spacing: Kirigami.Units.largeSpacing
 
                 DotAndCount {
                     dotColor: "#89b4fa"
@@ -177,7 +184,7 @@ PlasmoidItem {
                 text: root.loaded
                       ? i18n("Orca agents")
                       : (root.stateError || i18n("Orca unavailable"))
-                color: PlasmaCore.Theme.textColor
+                color: Kirigami.Theme.textColor
                 opacity: 0.7
                 horizontalAlignment: Text.AlignHCenter
             }
