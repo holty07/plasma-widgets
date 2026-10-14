@@ -14,6 +14,21 @@ PlasmoidItem {
     property int waitingCount: -1
     property int idleCount: -1
     property string stateError: ""
+    // One entry per agent for the desktop list: {group, state, agentType, paneKey, place, since}.
+    property var agentList: []
+    // paneKey -> spinner text ("Churning…") read off each working agent's screen.
+    property var activity: ({})
+    // paneKey -> terminal handle, from `orca terminal list`.
+    property var paneHandles: ({})
+    readonly property var workingPanes: root.agentList
+        .filter(function(entry) { return entry.group === "running" })
+        .map(function(entry) { return entry.paneKey })
+    // Refreshed on every poll so the "x min ago" labels keep moving.
+    property double now: Date.now()
+
+    // On the desktop show the full card directly; in a panel keep the dots.
+    preferredRepresentation: Plasmoid.formFactor === PlasmaCore.Types.Planar
+                             ? fullRepresentation : compactRepresentation
 
     // Orca CLI shim. Used over `orca` on PATH because the shell shim is only
     // exported inside interactive Orca shells.
@@ -42,6 +57,7 @@ PlasmoidItem {
         connectedSources: [root.orcaCommand]
         interval: 3000
         onNewData: function(sourceName, data) {
+            root.now = Date.now()
             var stdout = data["stdout"] || ""
             var stderr = data["stderr"] || ""
             // The CLI shim prints JSON on stdout and app diagnostics on stderr.
@@ -55,21 +71,52 @@ PlasmoidItem {
                 var result = payload.result || payload
                 var worktrees = result.worktrees || []
                 var running = 0, waiting = 0, idle = 0
+                var list = []
                 for (var w = 0; w < worktrees.length; ++w) {
-                    var agents = worktrees[w].agents || []
+                    var wt = worktrees[w]
+                    var agents = wt.agents || []
                     for (var a = 0; a < agents.length; ++a) {
-                        var st = "" + agents[a].state
+                        var agent = agents[a]
+                        var st = "" + agent.state
+                        var group = ""
                         // Orca agent states: working, waiting, monitoring,
                         // idle, done, blocked, failed, stopped, unverifiable.
                         if (st === "working" || st === "monitoring") {
                             ++running
+                            group = "running"
                         } else if (st === "waiting" || st === "blocked") {
                             ++waiting
+                            group = "waiting"
                         } else if (st === "idle" || st === "done") {
                             ++idle
+                            group = "idle"
                         }
+                        if (group === "") {
+                            continue
+                        }
+                        // Worktrees are usually named after their branch, so
+                        // only add the name when it isn't the main checkout.
+                        var place = wt.repo || wt.displayName || ""
+                        if (!wt.isMainWorktree && wt.displayName && wt.displayName !== place) {
+                            place += " · " + wt.displayName
+                        }
+                        list.push({
+                            group: group,
+                            state: st,
+                            agentType: "" + (agent.agentType || ""),
+                            paneKey: "" + (agent.paneKey || ""),
+                            place: place,
+                            since: agent.stateStartedAt || 0
+                        })
                     }
                 }
+                // Agents needing attention first, then running, then idle;
+                // newest state change first within each group.
+                var rank = { waiting: 0, running: 1, idle: 2 }
+                list.sort(function(x, y) {
+                    return rank[x.group] - rank[y.group] || y.since - x.since
+                })
+                root.agentList = list
                 root.runningCount = running
                 root.waitingCount = waiting
                 root.idleCount = idle
@@ -79,6 +126,81 @@ PlasmoidItem {
                 root.stateError = "Could not parse orca output"
             }
         }
+    }
+
+    // Maps agent panes to terminal handles, only while something is working.
+    Plasma5Support.DataSource {
+        id: terminalListSource
+        engine: "executable"
+        connectedSources: root.workingPanes.length > 0
+                          ? [root.orcaCli + " terminal list --json"] : []
+        interval: 3000
+        onNewData: function(sourceName, data) {
+            if (data["exit code"] !== 0) {
+                return
+            }
+            try {
+                var payload = JSON.parse(data["stdout"] || "")
+                var terminals = (payload.result || payload).terminals || []
+                var handles = {}
+                for (var i = 0; i < terminals.length; ++i) {
+                    var t = terminals[i]
+                    handles[t.tabId + ":" + t.leafId] = t.handle
+                }
+                root.paneHandles = handles
+            } catch (e) {
+            }
+        }
+    }
+
+    // Reads each working agent's rendered screen to pick up its spinner text.
+    Plasma5Support.DataSource {
+        id: screenSource
+        engine: "executable"
+        connectedSources: root.workingPanes
+            .filter(function(pane) { return root.paneHandles[pane] !== undefined })
+            .map(function(pane) { return root.screenCommand(pane) })
+        interval: 3000
+        onNewData: function(sourceName, data) {
+            var pane = sourceName.split(" #")[1]
+            var verb = ""
+            try {
+                var tail = JSON.parse(data["stdout"] || "").result.terminal.tail
+                var lines = Array.isArray(tail) ? tail : ("" + tail).split("\n")
+                for (var i = lines.length - 1; i >= 0 && verb === ""; --i) {
+                    // e.g. "✶ Churning… (26s · ↓ 2.0k tokens)"
+                    var m = lines[i].match(/^\s*\S\s+([A-Z][\w' -]*?(?:…|\.\.\.))/)
+                    if (m) {
+                        verb = m[1]
+                    }
+                }
+            } catch (e) {
+            }
+            var next = Object.assign({}, root.activity)
+            next[pane] = verb
+            root.activity = next
+        }
+    }
+
+    // The trailing "#pane" comment is ignored by the shell and lets
+    // onNewData tell which agent a screen belongs to.
+    function screenCommand(pane) {
+        return root.orcaCli + " terminal read --terminal " + root.paneHandles[pane]
+               + " --screen --limit 20 --json #" + pane
+    }
+
+    // Second line of a list row: what the agent is doing right now.
+    function statusText(entry) {
+        if (entry.group === "running") {
+            return root.activity[entry.paneKey] || i18n("Working…")
+        }
+        if (entry.state === "blocked") {
+            return i18n("Blocked")
+        }
+        if (entry.group === "waiting") {
+            return i18n("Waiting for you")
+        }
+        return entry.state === "idle" ? i18n("Idle") : i18n("Done")
     }
 
     // Convenience so a single dot/total pair can be reused.
@@ -151,43 +273,177 @@ PlasmoidItem {
         }
     }
 
-    fullRepresentation: Item {
-        // Simple centered summary in the popup.
-        ColumnLayout {
-            anchors.centerIn: parent
-            spacing: Kirigami.Units.smallSpacing
+    // Dot color for a list group, matching the counters above.
+    function groupColor(group) {
+        return group === "running" ? "#89b4fa"
+             : group === "waiting" ? "#f9e2af"
+             : "#a6e3a1"
+    }
 
-            RowLayout {
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: Kirigami.Units.largeSpacing
+    // Icon font for the agent glyphs; rows fall back to a plain dot without it.
+    readonly property string iconFont: "JetBrainsMono Nerd Font"
+    readonly property bool hasIconFont: Qt.fontFamilies().indexOf(iconFont) !== -1
 
-                DotAndCount {
-                    dotColor: "#89b4fa"
-                    count: root.shownRunning
-                    pulse: root.runningCount > 0
-                    available: root.loaded
-                }
-                DotAndCount {
-                    dotColor: "#f9e2af"
-                    count: root.shownWaiting
-                    pulse: root.waitingCount > 0
-                    available: root.loaded
-                }
-                DotAndCount {
-                    dotColor: "#a6e3a1"
-                    count: root.shownIdle
-                    available: root.loaded
+    // Nerd Font glyph per Orca agentType.
+    function agentGlyph(type) {
+        switch (type) {
+        case "claude":      return "\uec82"    // cod-claude
+        case "codex":
+        case "openai":      return "\uec81"    // cod-openai
+        case "gemini":      return "\uec21"    // cod-sparkle_filled
+        case "antigravity": return "\ue7f0"    // dev-google
+        case "copilot":     return "\uec1e"    // cod-copilot
+        case "cursor":      return "\uec5c"    // cod-cursor
+        case "opencode":    return "\uebc4"    // cod-terminal_cmd
+        default:            return "\uec20"    // cod-robot
+        }
+    }
+
+    function ago(ms) {
+        if (!ms) {
+            return ""
+        }
+        var mins = Math.max(0, Math.floor((root.now - ms) / 60000))
+        if (mins < 1) {
+            return i18n("just now")
+        }
+        if (mins < 60) {
+            return i18n("%1 min ago", mins)
+        }
+        var hours = Math.floor(mins / 60)
+        if (hours < 24) {
+            return i18n("%1 h ago", hours)
+        }
+        return i18n("%1 d ago", Math.floor(hours / 24))
+    }
+
+    fullRepresentation: ColumnLayout {
+        Layout.minimumWidth: Kirigami.Units.gridUnit * 16
+        Layout.minimumHeight: Kirigami.Units.gridUnit * 10
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 22
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 20
+        spacing: Kirigami.Units.smallSpacing
+
+        // Labelled counters.
+        RowLayout {
+            Layout.alignment: Qt.AlignHCenter
+            spacing: Kirigami.Units.largeSpacing * 2
+
+            Repeater {
+                model: [
+                    { label: i18n("Running"), color: "#89b4fa", count: root.shownRunning, pulse: root.runningCount > 0 },
+                    { label: i18n("Waiting"), color: "#f9e2af", count: root.shownWaiting, pulse: root.waitingCount > 0 },
+                    { label: i18n("Idle"),    color: "#a6e3a1", count: root.shownIdle,    pulse: false }
+                ]
+                delegate: ColumnLayout {
+                    required property var modelData
+                    spacing: 0
+
+                    DotAndCount {
+                        Layout.alignment: Qt.AlignHCenter
+                        dotColor: modelData.color
+                        count: modelData.count
+                        pulse: modelData.pulse
+                        available: root.loaded
+                    }
+                    PlasmaComponents.Label {
+                        Layout.alignment: Qt.AlignHCenter
+                        text: modelData.label
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                    }
                 }
             }
+        }
 
-            PlasmaComponents.Label {
-                text: root.loaded
-                      ? i18n("Orca agents")
-                      : (root.stateError || i18n("Orca unavailable"))
-                color: Kirigami.Theme.textColor
-                opacity: 0.7
-                horizontalAlignment: Text.AlignHCenter
+        Kirigami.Separator {
+            Layout.fillWidth: true
+        }
+
+        PlasmaComponents.ScrollView {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.agentList.length > 0
+
+            ListView {
+                model: root.agentList
+                clip: true
+                spacing: Kirigami.Units.smallSpacing
+
+                delegate: RowLayout {
+                    required property var modelData
+                    width: ListView.view.width
+                    spacing: Kirigami.Units.smallSpacing
+
+                    // Agent icon, tinted with the state color.
+                    PlasmaComponents.Label {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: Kirigami.Units.gridUnit * 1.25
+                        visible: root.hasIconFont
+                        text: root.agentGlyph(modelData.agentType)
+                        font.family: root.iconFont
+                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
+                        color: root.groupColor(modelData.group)
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    Rectangle {
+                        Layout.alignment: Qt.AlignTop
+                        Layout.topMargin: Kirigami.Units.smallSpacing
+                        visible: !root.hasIconFont
+                        implicitWidth: Kirigami.Units.smallSpacing * 2
+                        implicitHeight: implicitWidth
+                        radius: width / 2
+                        color: root.groupColor(modelData.group)
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Kirigami.Units.smallSpacing
+
+                            PlasmaComponents.Label {
+                                Layout.fillWidth: true
+                                text: modelData.place
+                                elide: Text.ElideRight
+                                font.weight: Font.DemiBold
+                                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.15
+                            }
+                            PlasmaComponents.Label {
+                                text: root.ago(modelData.since)
+                                opacity: 0.6
+                                font: Kirigami.Theme.smallFont
+                            }
+                        }
+                        PlasmaComponents.Label {
+                            Layout.fillWidth: true
+                            text: root.statusText(modelData)
+                            elide: Text.ElideRight
+                            maximumLineCount: 1
+                            color: modelData.group === "idle"
+                                   ? Kirigami.Theme.textColor : root.groupColor(modelData.group)
+                            opacity: modelData.group === "idle" ? 0.6 : 0.9
+                            font: Kirigami.Theme.smallFont
+                        }
+                    }
+                }
             }
+        }
+
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            Layout.fillHeight: root.agentList.length === 0
+            visible: root.agentList.length === 0 || !root.loaded || root.stateError !== ""
+            text: !root.loaded
+                  ? (root.stateError || i18n("Orca unavailable"))
+                  : root.stateError !== "" ? root.stateError
+                  : i18n("No agents")
+            opacity: 0.7
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            wrapMode: Text.Wrap
         }
     }
 }
