@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 import urllib.request
 import urllib.error
 import sqlite3
@@ -126,6 +127,62 @@ def detect_model_changes(cfg, catalog_version_cache):
     }
     return result
 
+def _sqlite_utc(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+def _percentile(sorted_vals, q):
+    if not sorted_vals:
+        return None
+    return sorted_vals[int((len(sorted_vals) - 1) * q)]
+
+def window_stats(db_path, start, end):
+    """Summary stats for requests with start <= created_at < end, from the raw table."""
+    rows = db_readonly_query(db_path, """
+        SELECT r.platform, r.model_id, r.status, r.input_tokens, r.output_tokens,
+               r.latency_ms, r.ttfb_ms, m.display_name
+        FROM requests r
+        LEFT JOIN models m ON m.id = r.model_db_id
+        WHERE r.created_at >= ? AND r.created_at < ?
+    """, (_sqlite_utc(start), _sqlite_utc(end)))
+    success = sum(1 for r in rows if r["status"] == "success")
+    errors = sum(1 for r in rows if r["status"] == "error")
+    latencies = sorted(r["latency_ms"] for r in rows if r["latency_ms"] is not None)
+    ttfbs = [r["ttfb_ms"] for r in rows if r["ttfb_ms"] is not None]
+    models = {}
+    for r in rows:
+        key = (r["platform"], r["model_id"])
+        m = models.setdefault(key, {"platform": r["platform"], "modelId": r["model_id"],
+                                    "displayName": r["display_name"] or r["model_id"],
+                                    "requests": 0, "totalInputTokens": 0, "totalOutputTokens": 0})
+        m["requests"] += 1
+        m["totalInputTokens"] += r["input_tokens"] or 0
+        m["totalOutputTokens"] += r["output_tokens"] or 0
+    return {
+        "totalRequests": len(rows),
+        # Canceled requests are neither success nor failure, matching the server.
+        "successRate": round(success / (success + errors) * 100, 1) if success + errors else None,
+        "avgLatencyMs": round(sum(latencies) / len(latencies)) if latencies else None,
+        "p50LatencyMs": _percentile(latencies, 0.5),
+        "p95LatencyMs": _percentile(latencies, 0.95),
+        "avgTtfbMs": round(sum(ttfbs) / len(ttfbs)) if ttfbs else None,
+        "totalInputTokens": sum(r["input_tokens"] or 0 for r in rows),
+        "totalOutputTokens": sum(r["output_tokens"] or 0 for r in rows),
+        "by_model": sorted(models.values(), key=lambda m: m["requests"], reverse=True),
+    }
+
+def daily_stats(cfg):
+    """Today since local midnight, and yesterday over the same span for a fair delta."""
+    db_path = cfg.get("db_path")
+    if not db_path:
+        return None
+    now = datetime.now().astimezone()
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    day = timedelta(days=1)
+    return {
+        "today": window_stats(db_path, midnight, now),
+        "yesterday": window_stats(db_path, midnight - day, now - day),
+    }
+
 def load_cache(path):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -181,6 +238,7 @@ def main(argv):
         out["error"] = "REST API unavailable or bad token"
     else:
         out["data"] = rest
+    out["daily"] = daily_stats(cfg)
     # Model changes + token budgets
     cache_path = os.path.expanduser(cfg.get("catalog_version_file",""))
     cache = load_cache(cache_path) if cfg.get("show_model_changes") else {}
