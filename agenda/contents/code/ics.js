@@ -34,6 +34,56 @@ function getOffsetMinutes(ianaName, date) {
 
     var dst = isAustralianDST(date);
 
+    // Northern Hemisphere DST check (US, EU, etc.)
+    // US/Canada: 2nd Sun Mar → 1st Sun Nov
+    // EU: last Sun Mar → last Sun Oct
+    function isNorthernDST(d) {
+        var year = d.getUTCFullYear();
+        var month = d.getUTCMonth(); // 0-indexed
+
+        // US/Canada DST: 2nd Sun March → 1st Sun November
+        function usDstStart(y) {
+            var d = new Date(Date.UTC(y, 2, 8)); // Mar 8
+            while (d.getUTCDay() !== 0) d = new Date(d.getTime() + 86400000);
+            return d;
+        }
+        function usDstEnd(y) {
+            var d = new Date(Date.UTC(y, 10, 1)); // Nov 1
+            while (d.getUTCDay() !== 0) d = new Date(d.getTime() + 86400000);
+            return d;
+        }
+
+        // EU DST: last Sun March → last Sun October
+        function euDstStart(y) {
+            var d = new Date(Date.UTC(y, 2, 31)); // Mar 31
+            while (d.getUTCDay() !== 0) d = new Date(d.getTime() - 86400000);
+            return d;
+        }
+        function euDstEnd(y) {
+            var d = new Date(Date.UTC(y, 9, 31)); // Oct 31
+            while (d.getUTCDay() !== 0) d = new Date(d.getTime() - 86400000);
+            return d;
+        }
+
+        if (month < 2 || month > 10) return false; // Dec-Feb: winter
+
+        // Check US DST window (Mar-Nov)
+        if (month >= 2 && month <= 10) {
+            var usStart = usDstStart(year);
+            var usEnd = usDstEnd(year);
+            if (d >= usStart && d < usEnd) return true;
+        }
+
+        // Check EU DST window (Mar-Oct)
+        if (month >= 2 && month <= 9) {
+            var euStart = euDstStart(year);
+            var euEnd = euDstEnd(year);
+            if (d >= euStart && d < euEnd) return true;
+        }
+
+        return false;
+    }
+
     var offsets = {
         // Australia
         "australia/sydney":    dst ? 660 : 600,
@@ -74,26 +124,26 @@ function getOffsetMinutes(ianaName, date) {
         "asia/almaty":         360,
         "asia/dubai":          240,
         "asia/riyadh":         180,
-        "asia/jerusalem":      180,  // Approximation — Israel DST varies
+        "asia/jerusalem":      180,
         "asia/beirut":         180,
 
-        // Europe
-        "europe/london":       0,    // Approximation — ignores BST
-        "europe/paris":        60,   // Approximation — ignores CEST
-        "europe/berlin":       60,
-        "europe/amsterdam":    60,
-        "europe/rome":         60,
-        "europe/madrid":       60,
-        "europe/zurich":       60,
+        // Europe — DST aware (BST=+1, CEST=+2)
+        "europe/london":       isNorthernDST(date) ? 60 : 0,
+        "europe/paris":        isNorthernDST(date) ? 120 : 60,
+        "europe/berlin":       isNorthernDST(date) ? 120 : 60,
+        "europe/amsterdam":    isNorthernDST(date) ? 120 : 60,
+        "europe/rome":         isNorthernDST(date) ? 120 : 60,
+        "europe/madrid":       isNorthernDST(date) ? 120 : 60,
+        "europe/zurich":       isNorthernDST(date) ? 120 : 60,
 
-        // Americas
-        "america/new york":    -300, // Approximation — ignores EDT
-        "america/los angeles": -480,
-        "america/chicago":     -360,
-        "america/denver":      -420,
+        // Americas — DST aware (EDT=-4, CDT=-5, MDT=-6, PDT=-7)
+        "america/new york":    isNorthernDST(date) ? -240 : -300,
+        "america/los angeles": isNorthernDST(date) ? -420 : -480,
+        "america/chicago":     isNorthernDST(date) ? -300 : -360,
+        "america/denver":      isNorthernDST(date) ? -360 : -420,
         "america/phoenix":     -420, // Arizona — no DST
-        "america/toronto":     -300,
-        "america/vancouver":   -480,
+        "america/toronto":     isNorthernDST(date) ? -240 : -300,
+        "america/vancouver":   isNorthernDST(date) ? -420 : -480,
 
         // UTC variants
         "utc":                 0,
@@ -160,13 +210,13 @@ function parseICSLine(line) {
             utcMs = new Date(y, mo, d, h, mi, s).getTime();
         }
 
-        return { date: new Date(utcMs), allDay: allDay };
+        return { date: new Date(utcMs), allDay: allDay, tzid: tzid };
     }
     return null;
 }
 
 // ── RRULE expander ────────────────────────────────────────────────────────
-function expandRRule(rrule, dtstart, rangeStart, rangeEnd) {
+function expandRRule(rrule, dtstart, rangeStart, rangeEnd, tzid) {
     var occurrences = [];
     if (!rrule || !dtstart) return occurrences;
 
@@ -191,6 +241,24 @@ function expandRRule(rrule, dtstart, rangeStart, rangeEnd) {
 
     var byDay = params["BYDAY"] ? params["BYDAY"].split(",") : null;
 
+    // dtstart is already in UTC. For recurring events with TZID, we need to
+    // preserve the wall-clock time in the original timezone for each occurrence.
+    // Extract the wall-clock time components from dtstart (by adding back the offset).
+    // We'll compute the original wall time by reversing the offset at dtstart.
+    var wallHours, wallMins, wallSecs;
+    if (tzid) {
+        var offsetAtStart = getOffsetMinutes(tzid, dtstart);
+        var wallMsAtStart = dtstart.getTime() + offsetAtStart * 60000;
+        var wallDate = new Date(wallMsAtStart);
+        wallHours = wallDate.getUTCHours();
+        wallMins = wallDate.getUTCMinutes();
+        wallSecs = wallDate.getUTCSeconds();
+    } else {
+        wallHours = dtstart.getUTCHours();
+        wallMins = dtstart.getUTCMinutes();
+        wallSecs = dtstart.getUTCSeconds();
+    }
+
     var current = new Date(dtstart.getTime());
     var n = 0;
     var maxIter = 1000;
@@ -206,7 +274,14 @@ function expandRRule(rrule, dtstart, rangeStart, rangeEnd) {
 
         if (freq === "DAILY") {
             current = new Date(current.getTime() + interval * 86400000);
+            if (tzid) {
+                // Re-convert wall time to UTC for the new date
+                var candWall = Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate(), wallHours, wallMins, wallSecs);
+                var offset = getOffsetMinutes(tzid, new Date(candWall));
+                current = new Date(candWall - offset * 60000);
+            }
         } else if (freq === "WEEKLY") {
+            // Preserve wall-clock time: add weeks, then re-convert to UTC
             if (byDay && byDay.length > 1) {
                 var stepped = false;
                 for (var dd = 1; dd <= 7 * interval; dd++) {
@@ -216,22 +291,59 @@ function expandRRule(rrule, dtstart, rangeStart, rangeEnd) {
                         var weeksSinceStart = Math.floor((cand.getTime() - dtstart.getTime()) / (7 * interval * 86400000));
                         var currentWeek    = Math.floor((current.getTime() - dtstart.getTime()) / (7 * interval * 86400000));
                         if (weeksSinceStart >= currentWeek) {
-                            current = cand;
+                            var candWall = Date.UTC(cand.getUTCFullYear(), cand.getUTCMonth(), cand.getUTCDate(), wallHours, wallMins, wallSecs);
+                            if (tzid) {
+                                var offset = getOffsetMinutes(tzid, new Date(candWall));
+                                current = new Date(candWall - offset * 60000);
+                            } else {
+                                current = new Date(candWall);
+                            }
                             stepped = true;
                             break;
                         }
                     }
                 }
-                if (!stepped) current = new Date(current.getTime() + 7 * interval * 86400000);
+                if (!stepped) {
+                    var next = new Date(current.getTime() + 7 * interval * 86400000);
+                    var nextWall = Date.UTC(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), wallHours, wallMins, wallSecs);
+                    if (tzid) {
+                        var offset = getOffsetMinutes(tzid, new Date(nextWall));
+                        current = new Date(nextWall - offset * 60000);
+                    } else {
+                        current = new Date(nextWall);
+                    }
+                }
             } else {
-                current = new Date(current.getTime() + 7 * interval * 86400000);
+                var next = new Date(current.getTime() + 7 * interval * 86400000);
+                var nextWall = Date.UTC(next.getUTCFullYear(), next.getUTCMonth(), next.getUTCDate(), wallHours, wallMins, wallSecs);
+                if (tzid) {
+                    var offset = getOffsetMinutes(tzid, new Date(nextWall));
+                    current = new Date(nextWall - offset * 60000);
+                } else {
+                    current = new Date(nextWall);
+                }
             }
         } else if (freq === "MONTHLY") {
-            current = new Date(current.getFullYear(), current.getMonth() + interval,
-                               current.getDate(), current.getHours(), current.getMinutes(), current.getSeconds());
+            // Preserve wall-clock time: advance month, keep same day/hour/min/sec
+            var nextMonth = current.getUTCMonth() + interval;
+            var nextYear  = current.getUTCFullYear();
+            if (nextMonth >= 12) { nextMonth -= 12; nextYear++; }
+            var nextWall = Date.UTC(nextYear, nextMonth, current.getUTCDate(), wallHours, wallMins, wallSecs);
+            if (tzid) {
+                var offset = getOffsetMinutes(tzid, new Date(nextWall));
+                current = new Date(nextWall - offset * 60000);
+            } else {
+                current = new Date(nextWall);
+            }
         } else if (freq === "YEARLY") {
-            current = new Date(current.getFullYear() + interval, current.getMonth(),
-                               current.getDate(), current.getHours(), current.getMinutes(), current.getSeconds());
+            var nextYear = current.getUTCFullYear() + interval;
+            var nextWall = Date.UTC(nextYear, current.getUTCMonth(), current.getUTCDate(), wallHours, wallMins, wallSecs);
+            if (tzid) {
+                var offset = getOffsetMinutes(tzid, new Date(nextWall));
+                current = new Date(nextWall - offset * 60000);
+            } else {
+                current = new Date(nextWall);
+            }
         } else {
             break;
         }
@@ -316,7 +428,7 @@ function parseICS(icsText) {
 
                 if (current.rrule) {
                     var lookback = new Date(todayStart.getTime() - 365 * 86400000);
-                    var occurrences = expandRRule(current.rrule, current.dtstart, lookback, todayEnd);
+                    var occurrences = expandRRule(current.rrule, current.dtstart, lookback, todayEnd, current.tzid);
                     for (var oi = 0; oi < occurrences.length; oi++) {
                         var occStart = occurrences[oi];
                         var occEnd   = new Date(occStart.getTime() + duration);
@@ -380,6 +492,7 @@ function parseICS(icsText) {
             if (result) {
                 current.dtstart = result.date;
                 current.allDay  = result.allDay;
+                current.tzid    = result.tzid;
             }
         } else if (upper.startsWith("DTEND")) {
             var result = parseICSLine(line);
