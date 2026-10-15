@@ -30,6 +30,26 @@ PlasmoidItem {
         return fmtNum(n)
     }
 
+    function getSummaryModel() {
+        if (!root.payload || !root.payload.ok || !root.payload.data || !root.payload.data.summary) return []
+        var s = root.payload.data.summary
+        return [
+            { label: "Requests (today)", value: s.totalRequests },
+            { label: "Success %", value: (s.successRate || 0) + "%" },
+            { label: "Avg Latency", value: (s.avgLatencyMs || 0) + " ms" },
+            { label: "p50 Latency", value: (s.p50LatencyMs || 0) + " ms" },
+            { label: "p95 Latency", value: (s.p95LatencyMs || 0) + " ms" },
+            { label: "Avg TTFB", value: (s.avgTtfbMs || 0) + " ms" },
+            { label: "Input Tokens (today)", value: fmtTokens(s.totalInputTokens) },
+            { label: "Output Tokens (today)", value: fmtTokens(s.totalOutputTokens) }
+        ]
+    }
+
+    function getLifetimeTotals() {
+        if (!root.payload || !root.payload.model_changes || !root.payload.model_changes.lifetime_totals) return null
+        return root.payload.model_changes.lifetime_totals
+    }
+
     Plasma5Support.DataSource {
         id: fetchSource
         engine: "executable"
@@ -53,7 +73,8 @@ PlasmoidItem {
     function refresh() {
         if (root.loading) return
         root.loading = true
-        fetchSource.connectSource(root.clickCommand)
+        // Fetch daily data
+        fetchSource.connectSource(root.clickCommand + " --range 1d")
     }
 
     Timer {
@@ -70,7 +91,7 @@ PlasmoidItem {
         if (!root.payload || !root.payload.ok) return "Loading…"
         var s = root.payload.data && root.payload.data.summary
         if (!s) return "No data"
-        return s.totalRequests + " req · " + fmtTokens(s.totalInputTokens) + " in · " + fmtTokens(s.totalOutputTokens) + " out"
+        return "Today: " + s.totalRequests + " req · " + fmtTokens(s.totalInputTokens) + " in · " + fmtTokens(s.totalOutputTokens) + " out"
     }
 
     compactRepresentation: MouseArea {
@@ -94,6 +115,7 @@ PlasmoidItem {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 24
         Layout.minimumHeight: Kirigami.Units.gridUnit * 22
         spacing: Kirigami.Units.smallSpacing
+        Layout.alignment: Qt.AlignTop
 
         RowLayout {
             Layout.fillWidth: true
@@ -117,6 +139,16 @@ PlasmoidItem {
             opacity: 0.7
         }
 
+        // Daily indicator
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            visible: root.payload && root.payload.ok
+            text: "Today"
+            font.bold: true
+            font.pixelSize: Kirigami.Units.smallSpacing * 3.5
+            color: Kirigami.Theme.highlightColor
+        }
+
         // Summary cards - 2 columns, bigger
         GridLayout {
             visible: root.payload && root.payload.ok
@@ -125,28 +157,22 @@ PlasmoidItem {
             columnSpacing: Kirigami.Units.mediumSpacing
             Layout.fillWidth: true
             Repeater {
-                model: [
-                    { label: "Requests", value: root.payload.data && root.payload.data.summary ? root.payload.data.summary.totalRequests : "—"},
-                    { label: "Success %", value: root.payload.data && root.payload.data.summary ? (root.payload.data.summary.successRate || 0) + "%" : "—"},
-                    { label: "Avg Latency", value: root.payload.data && root.payload.data.summary ? (root.payload.data.summary.avgLatencyMs || 0) + " ms" : "—"},
-                    { label: "p50 Latency", value: root.payload.data && root.payload.data.summary ? (root.payload.data.summary.p50LatencyMs || 0) + " ms" : "—"},
-                    { label: "p95 Latency", value: root.payload.data && root.payload.data.summary ? (root.payload.data.summary.p95LatencyMs || 0) + " ms" : "—"},
-                    { label: "Avg TTFB", value: root.payload.data && root.payload.data.summary ? (root.payload.data.summary.avgTtfbMs || 0) + " ms" : "—"},
-                    { label: "Input Tokens", value: root.payload.data && root.payload.data.summary ? fmtTokens(root.payload.data.summary.totalInputTokens) : "—"},
-                    { label: "Output Tokens", value: root.payload.data && root.payload.data.summary ? fmtTokens(root.payload.data.summary.totalOutputTokens) : "—"},
-                ]
+                model: root.getSummaryModel()
                 delegate: Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Kirigami.Units.gridUnit * 3.5
+                    Layout.minimumHeight: Kirigami.Units.gridUnit * 3.5
+                    Layout.alignment: Qt.AlignTop
                     radius: 10
                     color: Kirigami.Theme.backgroundColor
                     border.width: 1
                     border.color: Kirigami.Theme.disabledTextColor
                     ColumnLayout {
-                        anchors.fill: parent
+                        anchors.top: parent.top
+                        anchors.left: parent.left
+                        anchors.right: parent.right
                         anchors.margins: Kirigami.Units.mediumSpacing
-                        PlasmaComponents.Label { text: modelData.label; opacity: 0.7; font.pixelSize: Kirigami.Units.smallSpacing * 2.5 }
-                        PlasmaComponents.Label { text: modelData.value; font.bold: true; font.pixelSize: Kirigami.Units.smallSpacing * 4; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                        PlasmaComponents.Label { text: modelData.label; opacity: 0.7; font.pixelSize: Kirigami.Units.smallSpacing * 2.5; Layout.alignment: Qt.AlignTop }
+                        PlasmaComponents.Label { text: modelData.value; font.bold: true; font.pixelSize: Kirigami.Units.smallSpacing * 4; Layout.fillWidth: true; wrapMode: Text.Wrap; Layout.alignment: Qt.AlignTop }
                     }
                 }
             }
@@ -154,50 +180,23 @@ PlasmoidItem {
 
         Kirigami.Separator { Layout.fillWidth: true }
 
-        // By Platform
-        Kirigami.Heading { level: 5; text: "By Platform"; visible: root.payload && root.payload.ok }
-        PlasmaComponents.ScrollView {
-            visible: root.payload && root.payload.ok
-            Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 8
-            ListView {
-                model: root.payload.data && root.payload.data.by_platform ? root.payload.data.by_platform : []
-                delegate: Item {
-                    width: ListView.view.width
-                    implicitHeight: col.implicitHeight + Kirigami.Units.smallSpacing * 2
-                    ColumnLayout {
-                        id: col
-                        width: parent.width
-                        RowLayout {
-                            Layout.fillWidth: true
-                            PlasmaComponents.Label { text: modelData.displayName || modelData.platform; font.bold: true; Layout.fillWidth: true }
-                            PlasmaComponents.Label { text: (modelData.requests || 0) + " req"; font.bold: true; opacity: 0.7 }
-                        }
-                        PlasmaComponents.Label { text: fmtTokens(modelData.totalInputTokens) + " in · " + fmtTokens(modelData.totalOutputTokens) + " out · " + (modelData.avgTokensPerSecond || 0).toFixed(1) + " tok/s"; opacity: 0.7; Layout.fillWidth: true; elide: Text.ElideRight }
-                        PlasmaComponents.Label { text: (modelData.avgLatencyMs || 0) + " ms avg · " + (modelData.p95LatencyMs || 0) + " ms p95 · " + (modelData.successRate || 0) + "% success"; opacity: 0.7; Layout.fillWidth: true; elide: Text.ElideRight }
-                    }
-                }
-            }
-        }
-
-        Kirigami.Separator { Layout.fillWidth: true }
-
-        // Top models
+        // Top 3 Models
         Kirigami.Heading { level: 5; text: "Top Models"; visible: root.payload && root.payload.ok }
-        PlasmaComponents.ScrollView {
+        ColumnLayout {
             visible: root.payload && root.payload.ok
             Layout.fillWidth: true
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 12
-            ListView {
-                model: root.payload.data && root.payload.data.by_model ? root.payload.data.by_model.slice(0, 15) : []
+            Layout.alignment: Qt.AlignTop
+            Repeater {
+                model: (root.payload && root.payload.data && root.payload.data.by_model) ? root.payload.data.by_model.slice(0, 3) : []
                 delegate: Item {
-                    width: ListView.view.width
+                    Layout.fillWidth: true
                     implicitHeight: col.implicitHeight + Kirigami.Units.smallSpacing * 2
                     ColumnLayout {
                         id: col
                         width: parent.width
-                        PlasmaComponents.Label { text: modelData.displayName || modelData.modelId; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true }
-                        PlasmaComponents.Label { text: (modelData.requests || 0) + " req · " + fmtTokens(modelData.totalInputTokens) + " in · " + fmtTokens(modelData.totalOutputTokens) + " out"; opacity: 0.7; elide: Text.ElideRight; Layout.fillWidth: true }
+                        Layout.alignment: Qt.AlignTop
+                        PlasmaComponents.Label { text: modelData.displayName || modelData.modelId; font.bold: true; elide: Text.ElideRight; Layout.fillWidth: true; Layout.alignment: Qt.AlignTop }
+                        PlasmaComponents.Label { text: (modelData.requests || 0) + " req · " + fmtTokens(modelData.totalInputTokens) + " in · " + fmtTokens(modelData.totalOutputTokens) + " out"; opacity: 0.7; elide: Text.ElideRight; Layout.fillWidth: true; Layout.alignment: Qt.AlignTop }
                     }
                 }
             }
@@ -207,25 +206,27 @@ PlasmoidItem {
 
         // Lifetime totals
         PlasmaComponents.Label {
-            visible: root.payload && root.payload.model_changes && root.payload.model_changes.lifetime_totals
+            visible: root.getLifetimeTotals() !== null
             Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
             text: "Lifetime totals (server settings):"
             font.bold: true
         }
         GridLayout {
-            visible: root.payload && root.payload.model_changes && root.payload.model_changes.lifetime_totals
+            visible: root.getLifetimeTotals() !== null
             columns: 2
             Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
             rowSpacing: Kirigami.Units.smallSpacing
             columnSpacing: Kirigami.Units.mediumSpacing
-            PlasmaComponents.Label { text: "Total requests:"; opacity: 0.7 }
-            PlasmaComponents.Label { text: fmtNum(root.payload.model_changes.lifetime_totals.total_requests); font.bold: true }
-            PlasmaComponents.Label { text: "Input tokens:"; opacity: 0.7 }
-            PlasmaComponents.Label { text: fmtTokens(root.payload.model_changes.lifetime_totals.total_input_tokens); font.bold: true }
-            PlasmaComponents.Label { text: "Output tokens:"; opacity: 0.7 }
-            PlasmaComponents.Label { text: fmtTokens(root.payload.model_changes.lifetime_totals.total_output_tokens); font.bold: true }
-            PlasmaComponents.Label { text: "First request:"; opacity: 0.7 }
-            PlasmaComponents.Label { text: root.payload.model_changes.lifetime_totals.first_request_at || "—"; font.bold: true }
+            PlasmaComponents.Label { text: "Total requests:"; opacity: 0.7; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: root.getLifetimeTotals() ? fmtNum(root.getLifetimeTotals().total_requests) : "—"; font.bold: true; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: "Input tokens:"; opacity: 0.7; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: root.getLifetimeTotals() ? fmtTokens(root.getLifetimeTotals().total_input_tokens) : "—"; font.bold: true; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: "Output tokens:"; opacity: 0.7; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: root.getLifetimeTotals() ? fmtTokens(root.getLifetimeTotals().total_output_tokens) : "—"; font.bold: true; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: "First request:"; opacity: 0.7; Layout.alignment: Qt.AlignLeft }
+            PlasmaComponents.Label { text: root.getLifetimeTotals() ? (root.getLifetimeTotals().first_request_at || "—") : "—"; font.bold: true; Layout.alignment: Qt.AlignLeft }
         }
 
         PlasmaComponents.Label {
@@ -234,5 +235,8 @@ PlasmoidItem {
             opacity: 0.5
             text: root.payload && root.payload.received_at ? ("Updated " + new Date(root.payload.received_at).toLocaleString()) : ""
         }
+
+        // Absorb leftover height so content stays pinned to the top
+        Item { Layout.fillHeight: true }
     }
 }

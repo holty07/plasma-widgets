@@ -143,9 +143,25 @@ def save_cache(path, data):
 
 def main(argv):
     cfg_path = None
-    if "--config" in argv:
-        cfg_path = argv[argv.index("--config")+1]
+    range_ = "7d"  # default
+    
+    # Parse command line arguments
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--config":
+            cfg_path = argv[i+1]
+            i += 2
+        elif argv[i] == "--range":
+            range_ = argv[i+1]
+            i += 2
+        else:
+            i += 1
+    
     cfg = load_config(cfg_path)
+    # Override range from command line if provided
+    if range_ != "7d":  # only override if explicitly set
+        cfg["range"] = range_
+    
     out = {
         "received_at": now_ms(),
         "ok": False,
