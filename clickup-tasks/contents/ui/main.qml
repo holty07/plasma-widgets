@@ -270,6 +270,8 @@ PlasmoidItem {
                                 elide: Text.ElideRight
                                 maximumLineCount: 2
                                 wrapMode: Text.Wrap
+                                color: taskRow.modelData.bucket === "overdue"
+                                         ? root.groupColor("overdue") : Kirigami.Theme.textColor
                             }
                             PlasmaComponents.Label {
                                 Layout.fillWidth: true

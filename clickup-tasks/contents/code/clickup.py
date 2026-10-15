@@ -217,9 +217,8 @@ def main(argv):
     if errors and not all_tasks:
         return fail("; ".join(errors))
 
-    # Highest priority first, then soonest due date (start date when a task
-    # has no due date).
-    all_tasks.sort(key=lambda t: (t["priority_rank"], t["due"] or t["start"]))
+    # Overdue tasks first, then highest priority, then soonest due date.
+    all_tasks.sort(key=lambda t: (t["bucket"] != "overdue", t["priority_rank"], t["due"] or t["start"]))
 
     counts = {"overdue": 0, "open": 0}
     for task in all_tasks:
