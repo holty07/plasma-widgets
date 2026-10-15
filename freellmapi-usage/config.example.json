@@ -1,0 +1,10 @@
+{
+  "session_token": "",
+  "api_base": "http://127.0.0.1:3001/api/analytics",
+  "db_path": "~/freellmapi/server/data/freeapi.db",
+  "range": "7d",
+  "auto_refresh_interval": 300,
+  "refresh_on_click": true,
+  "show_model_changes": true,
+  "catalog_version_file": "~/.cache/freellmapi-usage/catalog_version.json"
+}

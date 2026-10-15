@@ -1,0 +1,24 @@
+{
+  "KPackageStructure": "Plasma/Applet",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Email": "holty07@gmail.com",
+        "Name": "holty07"
+      }
+    ],
+    "Category": "System Information",
+    "Description": "Tracks freellmapi usage: requests, tokens, latency, cost savings by model/platform, with model-catalog change detection.",
+    "Icon": "view-refresh",
+    "Id": "io.github.holty07.freellmapiusage",
+    "Keywords": ["freellmapi", "llm", "usage", "analytics", "api"],
+    "License": "GPL-3.0-or-later",
+    "Name": "FreeLLMAPI Usage",
+    "ServiceTypes": ["Plasma/Applet"],
+    "Version": "1.0.0",
+    "Website": "https://github.com/holty07/plasma-widgets"
+  },
+  "X-Plasma-API-Minimum-Version": "6.0",
+  "X-Plasma-MainScript": "ui/main.qml",
+  "X-Plasma-DefaultSize": "520,520"
+}
