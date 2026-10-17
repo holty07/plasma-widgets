@@ -58,7 +58,7 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 
 ### antigravity-usage
 * Tracks antigravity-cli weekly quota (`gemini-weekly` ring, `3p-weekly` bar) and context usage.
-* Reads `~/.gemini/antigravity-cli/plasma-agy-status.json`, written by a statusLine hook (setup script lives outside this repo in `~/agy-usage-hook`).
+* Reads `~/.gemini/antigravity-cli/plasma-agy-status.json`, written by the statusLine hook in `hook/` (install with `hook/setup-antigravity-usage-hook.py`). Own README exists.
 * UI components: `TypingDog.qml`, `UsageBar.qml`, `UsageRing.qml`, `main.qml`.
 * Id `io.github.holty07.antigravityusage`.
 

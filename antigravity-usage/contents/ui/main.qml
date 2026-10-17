@@ -129,7 +129,7 @@ PlasmoidItem {
                 readOnly: true
                 wrapMode: TextEdit.NoWrap
                 font.family: "monospace"
-                text: "cd ~/agy-usage-hook\npython3 setup-antigravity-usage-hook.py\n# then restart antigravity-cli"
+                text: "python3 ~/.local/share/plasma/plasmoids/io.github.holty07.antigravityusage/hook/setup-antigravity-usage-hook.py\n# then restart antigravity-cli"
             }
             QQC2.Label {
                 Layout.fillWidth: true
