@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "holty07@gmail.com",
+                "Name": "holty07"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Live herdr agent states in the panel",
+        "Icon": "utilities-terminal",
+        "Id": "io.github.holty07.herdrstatus",
+        "License": "MIT",
+        "Name": "Herdr Status",
+        "Version": "1.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

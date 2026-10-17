@@ -7,9 +7,11 @@ This document collects findings from agents working in this Plasma Widgets repos
 Finding: All widgets currently target KDE Plasma 6.
 
 * `agenda/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
+* `antigravity-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `claude-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `clickup-tasks/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `freellmapi-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
+* `herdr-status/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `orca-notifier/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 
 Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 APIs, Qt5 imports, or Plasma Shell 5 components. Build/test against Qt 6 / Kirigami 2 / Plasma 6.
@@ -53,6 +55,17 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
   overdue/open; sort by priority (urgent→low→none), then due date (start date if no
   due); left bar coloured by priority (urgent red, high yellow, normal purple, low
   grey, none black).
+
+### antigravity-usage
+* Tracks antigravity-cli weekly quota (`gemini-weekly` ring, `3p-weekly` bar) and context usage.
+* Reads `~/.gemini/antigravity-cli/plasma-agy-status.json`, written by a statusLine hook (setup script lives outside this repo in `~/agy-usage-hook`).
+* UI components: `TypingDog.qml`, `UsageBar.qml`, `UsageRing.qml`, `main.qml`.
+* Id `io.github.holty07.antigravityusage`.
+
+### herdr-status
+* Live herdr agent states in the panel; polls the `herdr` binary.
+* Settings (`contents/config/main.xml`): herdr binary path, poll interval, hide idle, highlight when blocked.
+* Id `io.github.holty07.herdrstatus`. MIT licensed.
 
 ### orca-notifier
 * Displays Orca agents: active, idle, waiting for input.

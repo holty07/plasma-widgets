@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "holty07@gmail.com",
+                "Name": "holty07"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Antigravity usage — pie in the panel, full breakdown on the desktop (data source pending confirmation)",
+        "Icon": "view-refresh",
+        "Id": "io.github.holty07.antigravityusage",
+        "License": "GPL-2.0-or-later",
+        "Name": "Antigravity Usage",
+        "Version": "1.0.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

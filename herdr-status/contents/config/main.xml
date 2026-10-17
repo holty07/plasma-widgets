@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+
+    <kcfgfile name=""/>
+
+    <group name="General">
+        <entry name="herdrBinary" type="String">
+            <label>Path to the herdr binary</label>
+            <default>herdr</default>
+        </entry>
+        <entry name="pollInterval" type="Int">
+            <label>Seconds between polls</label>
+            <default>3</default>
+        </entry>
+        <entry name="hideIdle" type="Bool">
+            <label>Hide the idle count in the panel</label>
+            <default>true</default>
+        </entry>
+        <entry name="attentionOnBlocked" type="Bool">
+            <label>Highlight the panel icon when an agent is blocked</label>
+            <default>true</default>
+        </entry>
+    </group>
+</kcfg>
