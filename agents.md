@@ -58,6 +58,14 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 * Displays Orca agents: active, idle, waiting for input.
 * Id `org.kde.plasma.orca-notifier`.
 * `X-Plasma-API` set to `declarativeappletscript`.
+* Sub-agents (2026-10-17): `orca worktree ps --json` does **not** return the
+  `subagents` roster Orca keeps internally (only `mainAgent`). So
+  `contents/code/subagents.py` reads `~/.config/orca/agent-hooks/last-status.json`
+  (paneKey → Claude `transcriptPath`) and each session's
+  `<session>/subagents/agent-*.jsonl` + `.meta.json`. A sub-agent is running until its
+  transcript contains Orca's `SubagentStop` hook attachment, or it hasn't been written
+  for 30 min (killed sub-agents never get the hook). Claude only; Codex sub-agents
+  aren't covered. Test with `python3 contents/code/subagents.py`.
 
 ## This Machine (Findings 2026-10-14)
 

@@ -22,6 +22,10 @@ PlasmoidItem {
     property var paneHandles: ({})
     // paneKey -> Orca tab title, with the agent's spinner glyph removed.
     property var paneTitles: ({})
+    // paneKey -> running Claude sub-agents: [{id, description, agentType, model, tool, startedAt}].
+    property var subagents: ({})
+    readonly property int subagentCount: Object.keys(root.subagents)
+        .reduce(function(sum, pane) { return sum + root.subagents[pane].length }, 0)
     readonly property var workingPanes: root.agentList
         .filter(function(entry) { return entry.group === "running" })
         .map(function(entry) { return entry.paneKey })
@@ -164,6 +168,27 @@ PlasmoidItem {
         }
     }
 
+    // `orca worktree ps` leaves out sub-agents, so a helper reads them from
+    // Claude's transcripts. Quoted because the repo path contains a space.
+    readonly property string subagentScript:
+        Qt.resolvedUrl("../code/subagents.py").toString().replace(/^file:\/\//, "")
+
+    Plasma5Support.DataSource {
+        id: subagentSource
+        engine: "executable"
+        connectedSources: ["python3 '" + root.subagentScript + "'"]
+        interval: 5000
+        onNewData: function(sourceName, data) {
+            if (data["exit code"] !== 0) {
+                return
+            }
+            try {
+                root.subagents = JSON.parse(data["stdout"] || "{}")
+            } catch (e) {
+            }
+        }
+    }
+
     // Reads each working agent's rendered screen to pick up its spinner text.
     Plasma5Support.DataSource {
         id: screenSource
@@ -282,6 +307,12 @@ PlasmoidItem {
             count: root.shownIdle
             available: root.loaded
         }
+        DotAndCount {
+            dotColor: "#cba6f7"            // mauve - sub-agents, only while some run
+            count: root.subagentCount
+            pulse: true
+            visible: root.subagentCount > 0
+        }
     }
 
     // Dot color for a list group, matching the counters above.
@@ -345,7 +376,8 @@ PlasmoidItem {
                 model: [
                     { label: i18n("Running"), color: "#89b4fa", count: root.shownRunning, pulse: root.runningCount > 0 },
                     { label: i18n("Waiting"), color: "#f9e2af", count: root.shownWaiting, pulse: root.waitingCount > 0 },
-                    { label: i18n("Idle"),    color: "#a6e3a1", count: root.shownIdle,    pulse: false }
+                    { label: i18n("Idle"),    color: "#a6e3a1", count: root.shownIdle,    pulse: false },
+                    { label: i18n("Sub-agents"), color: "#cba6f7", count: root.subagentCount, pulse: root.subagentCount > 0 }
                 ]
                 delegate: ColumnLayout {
                     required property var modelData
@@ -440,6 +472,44 @@ PlasmoidItem {
                                    ? Kirigami.Theme.textColor : root.groupColor(modelData.group)
                             opacity: modelData.group === "idle" ? 0.6 : 0.9
                             font: Kirigami.Theme.smallFont
+                        }
+
+                        // Sub-agents this agent has running, one line each.
+                        Repeater {
+                            model: root.subagents[modelData.paneKey] || []
+                            delegate: RowLayout {
+                                id: subRow
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.topMargin: Math.round(Kirigami.Units.smallSpacing / 2)
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Rectangle {
+                                    implicitWidth: Kirigami.Units.smallSpacing * 1.5
+                                    implicitHeight: implicitWidth
+                                    radius: width / 2
+                                    color: "#cba6f7"
+
+                                    SequentialAnimation on opacity {
+                                        loops: Animation.Infinite
+                                        NumberAnimation { to: 0.4; duration: 700; easing.type: Easing.InOutQuad }
+                                        NumberAnimation { to: 1; duration: 700; easing.type: Easing.InOutQuad }
+                                    }
+                                }
+                                PlasmaComponents.Label {
+                                    Layout.fillWidth: true
+                                    text: subRow.modelData.description || subRow.modelData.agentType || i18n("Sub-agent")
+                                    elide: Text.ElideRight
+                                    font: Kirigami.Theme.smallFont
+                                }
+                                PlasmaComponents.Label {
+                                    text: [subRow.modelData.tool, subRow.modelData.model,
+                                           root.ago(subRow.modelData.startedAt)]
+                                          .filter(function(part) { return part }).join(" · ")
+                                    opacity: 0.6
+                                    font: Kirigami.Theme.smallFont
+                                }
+                            }
                         }
                     }
                 }
