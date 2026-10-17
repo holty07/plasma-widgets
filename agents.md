@@ -56,7 +56,7 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 
 ### orca-notifier
 * Displays Orca agents: active, idle, waiting for input.
-* Id `org.kde.plasma.orca-notifier`.
+* Id `io.github.holty07.orcanotifier`.
 * `X-Plasma-API` set to `declarativeappletscript`.
 * Sub-agents (2026-10-17): `orca worktree ps --json` does **not** return the
   `subagents` roster Orca keeps internally (only `mainAgent`). So

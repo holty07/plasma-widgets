@@ -39,6 +39,9 @@ def load_config(path=None):
         cfg["config_error"] = f"No config at {path}"
     except Exception as e:
         cfg["config_error"] = f"Bad config {path}: {e}"
+    for key in ("db_path", "catalog_version_file"):
+        if cfg.get(key):
+            cfg[key] = os.path.expanduser(cfg[key])
     return cfg
 
 def api_get(token, base, path):
