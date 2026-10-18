@@ -230,7 +230,7 @@ PlasmoidItem {
                 readOnly: true
                 wrapMode: TextEdit.NoWrap
                 font.family: "monospace"
-                text: "cd ~/plasma-usage-hook\npython3 setup-claude-usage-hook.py\n# then restart Claude Code"
+                text: "python3 ~/.local/share/plasma/plasmoids/io.github.holty07.claudeusage/hook/setup-claude-usage-hook.py\n# then restart Claude Code"
             }
             QQC2.Label {
                 Layout.fillWidth: true

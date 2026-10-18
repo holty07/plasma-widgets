@@ -33,6 +33,7 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 ### claude-usage
 * Tracks Claude Code session/weekly usage.
 * UI components: `TypingCat.qml`, `UsageBar.qml`, `UsageRing.qml`, `main.qml`.
+* Reads `~/.claude/plasma-usage-status.json`, written by the statusLine hook in `hook/` (install with `hook/setup-claude-usage-hook.py`). Own README exists.
 * Category System Information.
 
 ### clickup-tasks
