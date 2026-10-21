@@ -9,13 +9,22 @@ import org.kde.plasma.plasma5support as Plasma5Support
 PlasmoidItem {
     id: root
 
-    // Last known agent counts, or -1 while we have no data yet.
-    property int runningCount: -1
-    property int waitingCount: -1
-    property int idleCount: -1
     property string stateError: ""
+    // Agents Orca has a status row for, from `orca worktree ps`:
+    // [{group, state, agentType, paneKey, place, since}].
+    property var statusAgents: []
+    // worktreeId -> display place ("repo · worktree"), from `orca worktree ps`.
+    property var worktreePlaces: ({})
+    // paneKey -> {agentIdentity, worktreeId, worktreePath, lastOutputAt, title}
+    // for every live terminal, from `orca terminal list`.
+    property var paneInfo: ({})
+    // Panes with a Hermes process running in them, from hermes_panes.py.
+    property var hermesPanes: []
     // One entry per agent for the desktop list: {group, state, agentType, paneKey, place, since}.
-    property var agentList: []
+    readonly property var agentList: root.mergeAgents(root.statusAgents, root.paneInfo, root.hermesPanes, root.now)
+    readonly property int runningCount: root.countGroup("running")
+    readonly property int waitingCount: root.countGroup("waiting")
+    readonly property int idleCount: root.countGroup("idle")
     // paneKey -> spinner text ("Churning…") read off each working agent's screen.
     property var activity: ({})
     // paneKey -> terminal handle, from `orca terminal list`.
@@ -46,10 +55,6 @@ PlasmoidItem {
 
     // Shown while Orca is unreachable, once we have had a successful read.
     readonly property bool loaded: root.hasData
-    // Round up negative edges so the panel never shows "-1".
-    readonly property int shownRunning: Math.max(0, root.runningCount)
-    readonly property int shownWaiting: Math.max(0, root.waitingCount)
-    readonly property int shownIdle: Math.max(0, root.idleCount)
 
     // The executable engine re-issues all connectedSources on `interval`.
     // Keep the command in one string so a single source name is reused across
@@ -76,10 +81,17 @@ PlasmoidItem {
                 var payload = JSON.parse(stdout)
                 var result = payload.result || payload
                 var worktrees = result.worktrees || []
-                var running = 0, waiting = 0, idle = 0
                 var list = []
+                var places = {}
                 for (var w = 0; w < worktrees.length; ++w) {
                     var wt = worktrees[w]
+                    // Worktrees are usually named after their branch, so
+                    // only add the name when it isn't the main checkout.
+                    var place = wt.repo || wt.displayName || ""
+                    if (!wt.isMainWorktree && wt.displayName && wt.displayName !== place) {
+                        place += " · " + wt.displayName
+                    }
+                    places[wt.worktreeId] = place
                     var agents = wt.agents || []
                     for (var a = 0; a < agents.length; ++a) {
                         var agent = agents[a]
@@ -88,23 +100,14 @@ PlasmoidItem {
                         // Orca agent states: working, waiting, monitoring,
                         // idle, done, blocked, failed, stopped, unverifiable.
                         if (st === "working" || st === "monitoring") {
-                            ++running
                             group = "running"
                         } else if (st === "waiting" || st === "blocked") {
-                            ++waiting
                             group = "waiting"
                         } else if (st === "idle" || st === "done") {
-                            ++idle
                             group = "idle"
                         }
                         if (group === "") {
                             continue
-                        }
-                        // Worktrees are usually named after their branch, so
-                        // only add the name when it isn't the main checkout.
-                        var place = wt.repo || wt.displayName || ""
-                        if (!wt.isMainWorktree && wt.displayName && wt.displayName !== place) {
-                            place += " · " + wt.displayName
                         }
                         list.push({
                             group: group,
@@ -116,16 +119,8 @@ PlasmoidItem {
                         })
                     }
                 }
-                // Agents needing attention first, then running, then idle;
-                // newest state change first within each group.
-                var rank = { waiting: 0, running: 1, idle: 2 }
-                list.sort(function(x, y) {
-                    return rank[x.group] - rank[y.group] || y.since - x.since
-                })
-                root.agentList = list
-                root.runningCount = running
-                root.waitingCount = waiting
-                root.idleCount = idle
+                root.statusAgents = list
+                root.worktreePlaces = places
                 root.stateError = ""
                 root.hasData = true
             } catch (e) {
@@ -139,8 +134,9 @@ PlasmoidItem {
         id: terminalListSource
         engine: "executable"
         connectedSources: [root.orcaCli + " terminal list --json"]
-        // Titles rarely change, and each CLI call starts the full Orca binary.
-        interval: 15000
+        // Also the only state source for agents Orca has no status row for
+        // (see mergeAgents), so poll as often as `worktree ps`.
+        interval: 5000
         onNewData: function(sourceName, data) {
             if (data["exit code"] !== 0) {
                 return
@@ -150,10 +146,18 @@ PlasmoidItem {
                 var terminals = (payload.result || payload).terminals || []
                 var handles = {}
                 var titles = {}
+                var info = {}
                 for (var i = 0; i < terminals.length; ++i) {
                     var t = terminals[i]
                     var pane = t.tabId + ":" + t.leafId
                     handles[pane] = t.handle
+                    info[pane] = {
+                        agentIdentity: "" + (t.agentIdentity || ""),
+                        worktreeId: t.worktreeId || "",
+                        worktreePath: t.worktreePath || "",
+                        lastOutputAt: t.lastOutputAt || 0,
+                        title: "" + (t.title || "")
+                    }
                     // "✳ Claude usage widget" -> "Claude usage widget". Titles
                     // that are just a path or command aren't worth showing.
                     var title = ("" + (t.title || "")).replace(/^[^\w~\/]+/, "").trim()
@@ -163,6 +167,7 @@ PlasmoidItem {
                 }
                 root.paneHandles = handles
                 root.paneTitles = titles
+                root.paneInfo = info
             } catch (e) {
             }
         }
@@ -184,6 +189,27 @@ PlasmoidItem {
             }
             try {
                 root.subagents = JSON.parse(data["stdout"] || "{}")
+            } catch (e) {
+            }
+        }
+    }
+
+    // Orca often has no status row for Hermes, and doesn't tag its TUI pane
+    // with an agentIdentity, so a helper finds Hermes processes by pane.
+    readonly property string hermesScript:
+        Qt.resolvedUrl("../code/hermes_panes.py").toString().replace(/^file:\/\//, "")
+
+    Plasma5Support.DataSource {
+        id: hermesSource
+        engine: "executable"
+        connectedSources: ["python3 '" + root.hermesScript + "'"]
+        interval: 5000
+        onNewData: function(sourceName, data) {
+            if (data["exit code"] !== 0) {
+                return
+            }
+            try {
+                root.hermesPanes = JSON.parse(data["stdout"] || "[]")
             } catch (e) {
             }
         }
@@ -223,6 +249,75 @@ PlasmoidItem {
     function screenCommand(pane) {
         return root.orcaCli + " terminal read --terminal " + root.paneHandles[pane]
                + " --screen --limit 20 --json #" + pane
+    }
+
+    // A pane with no status row counts as running while its output is this
+    // fresh. Wider than the 5 s terminal poll so a busy pane never flickers idle.
+    readonly property int outputRunningWindow: 10000
+
+    // Group for an agent pane Orca has no status row for. The Hermes TUI marks
+    // its tab title: ⚠ waiting on approval/input, ⏳ busy, ✓ idle. The TUI
+    // redraws while idle, so only fall back to output recency without a marker.
+    function untrackedGroup(info, now) {
+        var marker = info.title.trim().charAt(0)
+        if (marker === "\u26a0") {
+            return "waiting"
+        }
+        if (marker === "\u23f3") {
+            return "running"
+        }
+        if (marker === "\u2713") {
+            return "idle"
+        }
+        return info.lastOutputAt && now - info.lastOutputAt < root.outputRunningWindow
+               ? "running" : "idle"
+    }
+
+    // Orca's status rows plus agent panes it has no status row for: panes it
+    // tagged with an agentIdentity, and panes running a Hermes process. Hermes
+    // lands here because its hook events don't reach `worktree ps`.
+    function mergeAgents(statusAgents, paneInfo, hermesPanes, now) {
+        var list = statusAgents.slice()
+        var types = {}
+        for (var pane in paneInfo) {
+            if (paneInfo[pane].agentIdentity) {
+                types[pane] = paneInfo[pane].agentIdentity
+            }
+        }
+        for (var h = 0; h < hermesPanes.length; ++h) {
+            types[hermesPanes[h]] = "hermes"
+        }
+        for (var i = 0; i < list.length; ++i) {
+            delete types[list[i].paneKey]
+        }
+        for (var key in types) {
+            var info = paneInfo[key]
+            // Not in `terminal list` (yet): no title or place to show.
+            if (!info) {
+                continue
+            }
+            var group = root.untrackedGroup(info, now)
+            list.push({
+                group: group,
+                state: group === "running" ? "working" : group,
+                agentType: types[key],
+                paneKey: key,
+                place: root.worktreePlaces[info.worktreeId]
+                       || info.worktreePath.split("/").pop(),
+                since: info.lastOutputAt
+            })
+        }
+        // Agents needing attention first, then running, then idle;
+        // newest state change first within each group.
+        var rank = { waiting: 0, running: 1, idle: 2 }
+        list.sort(function(x, y) {
+            return rank[x.group] - rank[y.group] || y.since - x.since
+        })
+        return list
+    }
+
+    function countGroup(group) {
+        return root.agentList.filter(function(entry) { return entry.group === group }).length
     }
 
     // Second line of a list row: what the agent is doing right now.
@@ -292,19 +387,19 @@ PlasmoidItem {
 
         DotAndCount {
             dotColor: "#89b4fa"            // blue  - in progress
-            count: root.shownRunning
+            count: root.runningCount
             pulse: root.runningCount > 0
             available: root.loaded
         }
         DotAndCount {
             dotColor: "#f9e2af"            // yellow - waiting on response
-            count: root.shownWaiting
+            count: root.waitingCount
             pulse: root.waitingCount > 0
             available: root.loaded
         }
         DotAndCount {
             dotColor: "#a6e3a1"            // green - done/idle
-            count: root.shownIdle
+            count: root.idleCount
             available: root.loaded
         }
         DotAndCount {
@@ -374,9 +469,9 @@ PlasmoidItem {
 
             Repeater {
                 model: [
-                    { label: i18n("Running"), color: "#89b4fa", count: root.shownRunning, pulse: root.runningCount > 0 },
-                    { label: i18n("Waiting"), color: "#f9e2af", count: root.shownWaiting, pulse: root.waitingCount > 0 },
-                    { label: i18n("Idle"),    color: "#a6e3a1", count: root.shownIdle,    pulse: false },
+                    { label: i18n("Running"), color: "#89b4fa", count: root.runningCount, pulse: root.runningCount > 0 },
+                    { label: i18n("Waiting"), color: "#f9e2af", count: root.waitingCount, pulse: root.waitingCount > 0 },
+                    { label: i18n("Idle"),    color: "#a6e3a1", count: root.idleCount,    pulse: false },
                     { label: i18n("Sub-agents"), color: "#cba6f7", count: root.subagentCount, pulse: root.subagentCount > 0 }
                 ]
                 delegate: ColumnLayout {

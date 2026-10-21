@@ -80,6 +80,14 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
   transcript contains Orca's `SubagentStop` hook attachment, or it hasn't been written
   for 30 min (killed sub-agents never get the hook). Claude only; Codex sub-agents
   aren't covered. Test with `python3 contents/code/subagents.py`.
+* Hermes (2026-10-20): `orca worktree ps` has no status row for Hermes. Its
+  `orca-status` hook events reach Orca (HTTP 204) but never become a status, so Hermes
+  never appears there. `orca terminal list` tags some panes `agentIdentity: hermes`, but
+  not the Hermes TUI pane. So `contents/code/hermes_panes.py` scans `/proc` for Hermes
+  processes (exe under `~/.hermes`/`$HERMES_HOME`, or a `hermes` launcher) and reads
+  their `ORCA_PANE_KEY`. State comes from the TUI title marker: `⚠` waiting, `⏳` busy,
+  `✓` idle (Hermes `ui-tui/src/app/useMainApp.ts`). Panes without a marker count as
+  running if they printed output in the last 10 s. Test with `python3 contents/code/hermes_panes.py`.
 
 ## This Machine (Findings 2026-10-14)
 
