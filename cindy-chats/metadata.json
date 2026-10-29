@@ -1,0 +1,22 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "holty07@gmail.com",
+                "Name": "holty07"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Live Cindy chat states in the panel and desktop",
+        "Icon": "applications-internet",
+        "Id": "io.github.holty07.cindychats",
+        "License": "MIT",
+        "Name": "Cindy Chats",
+        "Version": "1.0"
+    },
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-API-Minimum-Version": "6.0",
+    "X-Plasma-MainScript": "ui/main.qml",
+    "X-Plasma-DefaultSize": "200,100"
+}
