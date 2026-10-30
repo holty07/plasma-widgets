@@ -33,21 +33,29 @@ PlasmoidItem {
     readonly property bool isTyping: nowTs < _typingUntil
     readonly property bool isThinking: codeActive && !isTyping
 
-    // Three sources, combined once all have reported back:
-    //   1. plan-usage-history.json - the desktop app's own rolling usage
-    //      cache (same numbers as the tray icon). Always present once the
-    //      app has run, covers chat + Cowork + Code equally. Primary source.
-    //   2. plasma-usage-status.json - our Claude Code statusLine hook.
-    //      Only present if that's been installed and Code has run recently.
-    //      If very fresh (<15min), its percentages take priority (most
-    //      real-time during an active coding session). Either way, if it's
-    //      reasonably fresh (<6h) its cost/context/model detail gets merged
-    //      in on top of whichever snapshot wins.
-    //   3. ~/.claude.json cachedUsageUtilization - last-resort fallback,
-    //      only used if neither of the above produced anything.
+    // Four sources, read in parallel and combined once all have reported back.
+    // The 5h/7d limits are one account-wide pool, so whichever source saw
+    // them most recently wins:
+    //   1. Cindy's DB (account_usage_snapshots) - refreshed on every Claude
+    //      turn Cindy runs. Cindy doesn't fire the statusLine hook.
+    //   2. plasma-usage-status.json - our Claude Code statusLine hook. Only
+    //      present if installed and the Code CLI has run. If reasonably fresh
+    //      (<6h) its cost/context/model detail is merged in on top of
+    //      whichever snapshot wins.
+    //   3. ~/.claude.json cachedUsageUtilization - Claude Code's own cache.
+    //   4. plan-usage-history.json - the desktop app's rolling usage cache,
+    //      only updated while the desktop app runs.
     property var _appSnap: null
     property var _hookSnap: null
+    property var _claudeJsonSnap: null
+    property var _cindySnap: null
     property int _pending: 0
+
+    // Newest Cindy account DB; there is one cindy-<account>.db per signed-in account.
+    readonly property string cindyCommand:
+        "db=$(ls -t ~/.config/CindyGlobal/cindy-*.db 2>/dev/null | head -n 1); "
+        + "[ -n \"$db\" ] && sqlite3 -readonly -json \"$db\" "
+        + "\"SELECT snapshot FROM account_usage_snapshots WHERE agent_kind = 'claude-code';\" 2>/dev/null"
 
     // Shell out to `cat` rather than reading file:// URLs from QML directly —
     // sidesteps any QML-engine/module quirks around local file access entirely.
@@ -76,23 +84,39 @@ PlasmoidItem {
     }
 
     Plasma5Support.DataSource {
-        id: catFallback
+        id: catClaudeJson
         engine: "executable"
         connectedSources: []
         onNewData: function (sourceName, data) {
             disconnectSource(sourceName)
             var text = (data && data["stdout"]) ? data["stdout"] : ""
-            var snap = text ? Usage.fromClaudeJson(text) : null
-            root.snapshot = snap || Usage.emptySnapshot()
+            root._claudeJsonSnap = text ? Usage.fromClaudeJson(text) : null
+            root._maybeCombine()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: cindyUsage
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            root._cindySnap = text ? Usage.fromCindyDb(text) : null
+            root._maybeCombine()
         }
     }
 
     function refresh() {
         _appSnap = null
         _hookSnap = null
-        _pending = 2
+        _claudeJsonSnap = null
+        _cindySnap = null
+        _pending = 4
         catAppUsage.connectSource("cat ~/.config/Claude/plan-usage-history.json 2>/dev/null")
         catHook.connectSource("cat ~/.claude/plasma-usage-status.json 2>/dev/null")
+        catClaudeJson.connectSource("cat ~/.claude.json 2>/dev/null")
+        cindyUsage.connectSource(root.cindyCommand)
     }
 
     function _maybeCombine() {
@@ -100,10 +124,8 @@ PlasmoidItem {
         if (_pending > 0) return
 
         var now = Date.now() / 1000
-        var appAvail = _appSnap && _appSnap.available
         var hookAvail = _hookSnap && _hookSnap.available
         var hookAge = (hookAvail && _hookSnap.receivedAt !== null) ? (now - _hookSnap.receivedAt) : Infinity
-        var hookFresh = hookAvail && hookAge < 15 * 60
         var hookUsableForDetail = hookAvail && hookAge < 6 * 3600
 
         // Did the hook write something new since our last poll?
@@ -114,12 +136,15 @@ PlasmoidItem {
             _lastHookReceivedAt = _hookSnap.receivedAt
         }
 
+        var snaps = [_cindySnap, _hookSnap, _claudeJsonSnap, _appSnap].filter(function (s) {
+            return s && s.available
+        })
+        snaps.sort(function (a, b) { return (b.receivedAt || 0) - (a.receivedAt || 0) })
+
         var chosen = null
-        if (hookFresh) {
-            chosen = _hookSnap
-        } else if (appAvail) {
-            chosen = Object.assign({}, _appSnap)
-            if (hookUsableForDetail) {
+        if (snaps.length > 0) {
+            chosen = Object.assign({}, snaps[0])
+            if (hookUsableForDetail && chosen.source !== "hook") {
                 chosen.contextPct = _hookSnap.contextPct
                 chosen.contextSize = _hookSnap.contextSize
                 chosen.costUsd = _hookSnap.costUsd
@@ -128,15 +153,9 @@ PlasmoidItem {
                 chosen.effort = _hookSnap.effort
                 chosen.project = _hookSnap.project
             }
-        } else if (hookAvail) {
-            chosen = _hookSnap
         }
 
-        if (chosen) {
-            root.snapshot = chosen
-        } else {
-            catFallback.connectSource("cat ~/.claude.json 2>/dev/null")
-        }
+        root.snapshot = chosen || Usage.emptySnapshot()
     }
 
     function resetLabel(resetsAt) {
@@ -410,7 +429,12 @@ PlasmoidItem {
                 text: {
                     if (root.snapshot.receivedAt === null) return ""
                     var ago = Math.max(0, Math.round(root.nowTs - root.snapshot.receivedAt))
-                    var src = root.snapshot.source === "claude-json" ? " (fallback source — no usage cache found yet)" : ""
+                    var src = ({
+                        "cindy": " via Cindy",
+                        "hook": " via Claude Code",
+                        "claude-json": " via Claude Code cache",
+                        "app-cache": " via Claude desktop app"
+                    })[root.snapshot.source] || ""
                     return "Updated " + Usage.fmtDuration(ago) + " ago" + src + (root.isStale ? " ⚠ stale" : "")
                 }
             }

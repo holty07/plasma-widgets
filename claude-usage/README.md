@@ -3,7 +3,16 @@
 Panel: a small pie showing your current 5-hour session % used.
 Desktop: full breakdown with session %, weekly %, context window, cost, model and project.
 
-No network calls, no login, no scraping. Claude Code passes a JSON blob with your rate-limit percentages, context window, cost and model to its `statusLine` command. The hook in `hook/` saves that JSON to `~/.claude/plasma-usage-status.json`, and the widget reads it. If the hook hasn't run yet, the widget falls back to Claude Code's own cached quota in `~/.claude.json` (fewer details, no setup).
+No network calls, no login, no scraping. The widget reads four local sources and shows whichever saw your limits most recently (the footer says which):
+
+| Source | Where | Notes |
+|--------|-------|-------|
+| Cindy | `account_usage_snapshots` in the newest `~/.config/CindyGlobal/cindy-*.db` | Updated on every Claude turn Cindy runs. Cindy doesn't fire the statusLine hook. |
+| statusLine hook | `~/.claude/plasma-usage-status.json` | Written by the hook in `hook/` whenever the Claude Code CLI redraws its status line. Only source with context, cost and model. |
+| Claude Code cache | `~/.claude.json` → `cachedUsageUtilization` | No setup needed. |
+| Claude desktop app | `~/.config/Claude/plan-usage-history.json` | Only updated while the desktop app runs. No reset times. |
+
+If the hook data is under 6 hours old, its context, cost and model are shown alongside whichever percentages win.
 
 The 5-hour and 7-day limits are one pool shared across Claude Code, Claude.ai chat and Cowork, so the numbers cover all three.
 

@@ -2,13 +2,16 @@
 
 // Reads Claude Code's local usage data. No network access, ever.
 //
-// Two sources, preferred in this order:
+// Sources (main.qml shows whichever saw the limits most recently):
 //   1. ~/.claude/plasma-usage-status.json   - written by our statusLine hook,
-//      refreshed every time Claude Code redraws its status line. Freshest,
-//      and the only source with cost/context/model detail.
+//      refreshed every time Claude Code redraws its status line. The only
+//      source with cost/context/model detail.
 //   2. ~/.claude.json  -> cachedUsageUtilization - Claude Code's own cached
 //      quota snapshot. Present even if the hook was never installed, but
 //      only carries the two percentages + reset times, nothing else.
+//   3. ~/.config/Claude/plan-usage-history.json - Claude desktop app cache.
+//   4. Cindy's SQLite DB -> account_usage_snapshots - refreshed on every
+//      Claude turn Cindy runs (Cindy doesn't fire the statusLine hook).
 
 function clampPct(v) {
     var n = parseFloat(v)
@@ -84,6 +87,48 @@ function fromHookPayload(text) {
     snap.project = project ? project.split("/").pop() : ""
     snap.receivedAt = (data._received_at_ts !== undefined) ? data._received_at_ts : now
     snap.source = "hook"
+    return snap
+}
+
+// Cindy keeps the latest Claude rate limits in its SQLite DB:
+//   account_usage_snapshots(agent_kind = 'claude-code').snapshot
+// `text` is `sqlite3 -json` output: [{"snapshot": "<json string>"}].
+// resetsAt is in seconds, updatedAt in milliseconds.
+function fromCindyDb(text) {
+    var rows
+    try {
+        rows = JSON.parse(text)
+    } catch (e) {
+        return null
+    }
+    if (!Array.isArray(rows) || rows.length === 0) return null
+
+    var data
+    try {
+        data = JSON.parse(rows[0].snapshot)
+    } catch (e) {
+        return null
+    }
+    if (!data || typeof data !== "object") return null
+
+    var five = data.fiveHour || {}
+    var seven = data.sevenDay || {}
+    if (five.utilization === undefined && seven.utilization === undefined) return null
+
+    var now = Date.now() / 1000
+    var fiveReset = (five.resetsAt !== undefined) ? five.resetsAt : null
+    var sevenReset = (seven.resetsAt !== undefined) ? seven.resetsAt : null
+
+    var snap = emptySnapshot()
+    snap.available = true
+    snap.sessionPct = (five.utilization !== undefined)
+        ? ((fiveReset !== null && fiveReset < now) ? 0 : clampPct(five.utilization)) : null
+    snap.sessionResetsAt = fiveReset
+    snap.weeklyPct = (seven.utilization !== undefined)
+        ? ((sevenReset !== null && sevenReset < now) ? 0 : clampPct(seven.utilization)) : null
+    snap.weeklyResetsAt = sevenReset
+    snap.receivedAt = data.updatedAt ? data.updatedAt / 1000 : now
+    snap.source = "cindy"
     return snap
 }
 
