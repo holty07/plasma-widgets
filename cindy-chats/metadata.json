@@ -8,12 +8,12 @@
             }
         ],
         "Category": "System Information",
-        "Description": "Live Cindy chat states in the panel and desktop",
+        "Description": "Live Cindy chat states in the panel and desktop; includes Claude Code (5h/7d) and antigravity-cli (weekly) usage tracker",
         "Icon": "applications-internet",
         "Id": "io.github.holty07.cindychats",
         "License": "MIT",
         "Name": "Cindy Chats",
-        "Version": "1.0"
+        "Version": "1.1"
     },
     "X-Plasma-API": "declarativeappletscript",
     "X-Plasma-API-Minimum-Version": "6.0",

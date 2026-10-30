@@ -7,6 +7,8 @@ import org.kde.kirigami as Kirigami
 import org.kde.plasma.extras as PlasmaExtras
 import org.kde.plasma.plasma5support as Plasma5Support
 
+import "../code/usage.js" as Usage
+
 PlasmoidItem {
     id: root
 
@@ -53,6 +55,15 @@ PlasmoidItem {
     // Path to the Cindy SQLite database
     readonly property string cindyDbPath: plasmoid.configuration.cindyDbPath || "/home/holty/.config/CindyGlobal/cindy-cmvsyhcia10i9yw01rst1i34s.db"
 
+    // Usage tracker state
+    property var usageSnapshot: Usage.emptySnapshot()
+    property real nowTs: Date.now() / 1000
+    property var _usageAppSnap: null
+    property var _usageHookSnap: null
+    property var _usageAgySnap: null
+    property var _usageCindySnap: null
+    property int _usagePending: 0
+
     Plasma5Support.DataSource {
         id: executable
         engine: "executable"
@@ -86,12 +97,84 @@ PlasmoidItem {
         }
     }
 
+    // Usage tracker DataSources
+    // Cindy's own copy of the Claude rate limits, refreshed from the API
+    // response headers on every Claude Code turn Cindy runs.
+    Plasma5Support.DataSource {
+        id: cindyUsage
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            root._usageCindySnap = text ? Usage.fromCindyDb(text) : null
+            root._maybeCombineUsage()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: catAppUsage
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            root._usageAppSnap = text ? Usage.fromPlanUsageHistory(text) : null
+            root._maybeCombineUsage()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: catHook
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            root._usageHookSnap = text ? Usage.fromHookPayload(text) : null
+            root._maybeCombineUsage()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: catAgyHook
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            root._usageAgySnap = text ? Usage.fromAgyPayload(text) : null
+            root._maybeCombineUsage()
+        }
+    }
+
+    Plasma5Support.DataSource {
+        id: catFallback
+        engine: "executable"
+        connectedSources: []
+        onNewData: function (sourceName, data) {
+            disconnectSource(sourceName)
+            var text = (data && data["stdout"]) ? data["stdout"] : ""
+            var snap = text ? Usage.fromClaudeJson(text) : null
+            if (snap) {
+                root.usageSnapshot = snap
+            }
+        }
+    }
+
     Timer {
         interval: Math.max(1, plasmoid.configuration.pollInterval) * 1000
         running: true
         repeat: true
         triggeredOnStart: true
         onTriggered: root.refresh()
+    }
+
+    Timer {
+        interval: 1000
+        running: true
+        repeat: true
+        onTriggered: root.nowTs = Date.now() / 1000
     }
 
     function refresh() {
@@ -107,6 +190,86 @@ PlasmoidItem {
             + "WHERE status = 'active' "
             + "ORDER BY updated_at DESC;\""
         executable.run(cmd)
+
+        // Also refresh usage data
+        root.refreshUsage()
+    }
+
+    function refreshUsage() {
+        _usageAppSnap = null
+        _usageHookSnap = null
+        _usageAgySnap = null
+        _usageCindySnap = null
+        _usagePending = 4
+        cindyUsage.connectSource("sqlite3 -readonly -json '" + root.cindyDbPath + "' "
+            + "\"SELECT snapshot FROM account_usage_snapshots WHERE agent_kind = 'claude-code';\"")
+        catAppUsage.connectSource("cat ~/.config/Claude/plan-usage-history.json 2>/dev/null")
+        catHook.connectSource("cat ~/.claude/plasma-usage-status.json 2>/dev/null")
+        catAgyHook.connectSource("cat ~/.gemini/antigravity-cli/plasma-agy-status.json 2>/dev/null")
+    }
+
+    function _maybeCombineUsage() {
+        _usagePending -= 1
+        if (_usagePending > 0) return
+
+        var now = Date.now() / 1000
+        var hookAvail = _usageHookSnap && _usageHookSnap.available
+        var agyAvail = _usageAgySnap && _usageAgySnap.available
+        var hookAge = (hookAvail && _usageHookSnap.receivedAt !== null) ? (now - _usageHookSnap.receivedAt) : Infinity
+        var hookFresh = hookAvail && hookAge < 15 * 60
+        var hookUsableForDetail = hookAvail && hookAge < 6 * 3600
+
+        // Claude limits are account-wide, so whichever source saw them most
+        // recently wins: Cindy's DB, the statusLine hook, or the desktop app cache.
+        var claudeSnaps = [_usageCindySnap, _usageHookSnap, _usageAppSnap].filter(function (s) {
+            return s && s.available
+        })
+        claudeSnaps.sort(function (a, b) { return (b.receivedAt || 0) - (a.receivedAt || 0) })
+
+        var chosen = null
+        if (claudeSnaps.length > 0) {
+            chosen = Object.assign({}, claudeSnaps[0])
+            // Merge hook details (cost, context, model) only if hook is reasonably fresh
+            if (hookUsableForDetail && chosen.source !== "hook") {
+                chosen.contextPct = _usageHookSnap.contextPct
+                chosen.contextSize = _usageHookSnap.contextSize
+                chosen.costUsd = _usageHookSnap.costUsd
+                chosen.durationMs = _usageHookSnap.durationMs
+                chosen.model = _usageHookSnap.model
+                chosen.effort = _usageHookSnap.effort
+                chosen.project = _usageHookSnap.project
+            }
+        }
+
+        // Merge antigravity data if available
+        if (agyAvail && chosen) {
+            chosen.agySessionPct = _usageAgySnap.agySessionPct
+            chosen.agySessionResetsAt = _usageAgySnap.agySessionResetsAt
+            chosen.agyWeeklyPct = _usageAgySnap.agyWeeklyPct
+            chosen.agyWeeklyResetsAt = _usageAgySnap.agyWeeklyResetsAt
+            chosen.agyContextPct = _usageAgySnap.agyContextPct
+            chosen.agyContextSize = _usageAgySnap.agyContextSize
+            chosen.agyModel = _usageAgySnap.agyModel
+            chosen.agyEffort = _usageAgySnap.agyEffort
+            chosen.agyProject = _usageAgySnap.agyProject
+            chosen.agyPlanTier = _usageAgySnap.agyPlanTier
+            chosen.agyAgentState = _usageAgySnap.agyAgentState
+        } else if (agyAvail && !chosen) {
+            chosen = _usageAgySnap
+        }
+
+        if (chosen) {
+            root.usageSnapshot = chosen
+        } else {
+            catFallback.connectSource("cat ~/.claude.json 2>/dev/null")
+        }
+    }
+
+    function resetLabel(resetsAt) {
+        if (resetsAt === null || resetsAt === undefined) return ""
+        var remain = resetsAt - nowTs
+        if (remain <= 0) return "resetting…"
+        return Usage.fmtDuration(remain) + " left"
     }
 
     // sqlite3 -json returns an array of objects
@@ -296,7 +459,7 @@ PlasmoidItem {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 20
         Layout.minimumHeight: Kirigami.Units.gridUnit * 14
         Layout.preferredWidth: Kirigami.Units.gridUnit * 24
-        Layout.preferredHeight: Kirigami.Units.gridUnit * 18
+        Layout.preferredHeight: Kirigami.Units.gridUnit * 26
         collapseMarginsHint: true
 
         header: PlasmaExtras.PlasmoidHeading {
@@ -322,82 +485,99 @@ PlasmoidItem {
             }
         }
 
-        contentItem: Item {
-            PlasmaExtras.PlaceholderMessage {
-                anchors.centerIn: parent
-                width: parent.width - Kirigami.Units.gridUnit * 4
-                visible: root.chatList.length === 0
-                iconName: root.errorText !== "" ? "dialog-warning" : "applications-internet"
-                text: root.errorText !== "" ? root.errorText : i18n("No active chats")
-                explanation: root.errorText !== ""
-                    ? i18n("Check the database path in the widget settings.")
-                    : i18n("Open a chat in Cindy and it will show up here.")
-            }
+        // No anchors here: Page positions contentItem below the header, and
+        // anchoring it to the parent would pull it up underneath the header.
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
 
-            PlasmaComponents.ScrollView {
-                anchors.fill: parent
-                visible: root.chatList.length > 0
+            // Chat list section
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.minimumHeight: Kirigami.Units.gridUnit * 10
 
-                ListView {
-                    model: root.chatList
-                    clip: true
-                    spacing: 0
+                PlasmaExtras.PlaceholderMessage {
+                    anchors.centerIn: parent
+                    width: parent.width - Kirigami.Units.gridUnit * 4
+                    visible: root.chatList.length === 0
+                    iconName: root.errorText !== "" ? "dialog-warning" : "applications-internet"
+                    text: root.errorText !== "" ? root.errorText : i18n("No active chats")
+                    explanation: root.errorText !== ""
+                        ? i18n("Check the database path in the widget settings.")
+                        : i18n("Open a chat in Cindy and it will show up here.")
+                }
 
-                    delegate: PlasmaComponents.ItemDelegate {
-                        width: ListView.view.width
+                PlasmaComponents.ScrollView {
+                    anchors.fill: parent
+                    visible: root.chatList.length > 0
 
-                        contentItem: RowLayout {
-                            spacing: Kirigami.Units.largeSpacing
+                    ListView {
+                        model: root.chatList
+                        clip: true
+                        spacing: 0
 
-                            PlasmaComponents.Label {
-                                Layout.alignment: Qt.AlignTop
-                                Layout.preferredWidth: Kirigami.Units.gridUnit * 1.25
-                                visible: root.hasIconFont
-                                text: root.agentGlyph(modelData.agentType)
-                                font.family: root.iconFont
-                                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
-                                color: root.stateColour[root.normalise(modelData.state)]
-                                horizontalAlignment: Text.AlignHCenter
-                            }
+                        delegate: PlasmaComponents.ItemDelegate {
+                            width: ListView.view.width
 
-                            Rectangle {
-                                Layout.alignment: Qt.AlignTop
-                                Layout.topMargin: Kirigami.Units.smallSpacing
-                                visible: !root.hasIconFont
-                                implicitWidth: Kirigami.Units.smallSpacing * 2
-                                implicitHeight: implicitWidth
-                                radius: width / 2
-                                color: root.stateColour[root.normalise(modelData.state)]
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 0
+                            contentItem: RowLayout {
+                                spacing: Kirigami.Units.largeSpacing
 
                                 PlasmaComponents.Label {
-                                    text: modelData.title
-                                    elide: Text.ElideRight
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.preferredWidth: Kirigami.Units.gridUnit * 1.25
+                                    visible: root.hasIconFont
+                                    text: root.agentGlyph(modelData.agentType)
+                                    font.family: root.iconFont
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.3
+                                    color: root.stateColour[root.normalise(modelData.state)]
+                                    horizontalAlignment: Text.AlignHCenter
+                                }
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignTop
+                                    Layout.topMargin: Kirigami.Units.smallSpacing
+                                    visible: !root.hasIconFont
+                                    implicitWidth: Kirigami.Units.smallSpacing * 2
+                                    implicitHeight: implicitWidth
+                                    radius: width / 2
+                                    color: root.stateColour[root.normalise(modelData.state)]
+                                }
+
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    font.weight: Font.DemiBold
+                                    spacing: 0
+
+                                    PlasmaComponents.Label {
+                                        text: modelData.title
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                        font.weight: Font.DemiBold
+                                    }
+
+                                    PlasmaComponents.Label {
+                                        text: modelData.place + (modelData.model ? " · " + modelData.model : "")
+                                        elide: Text.ElideRight
+                                        opacity: 0.65
+                                        font: Kirigami.Theme.smallFont
+                                        Layout.fillWidth: true
+                                    }
                                 }
 
                                 PlasmaComponents.Label {
-                                    text: modelData.place + (modelData.model ? " · " + modelData.model : "")
-                                    elide: Text.ElideRight
-                                    opacity: 0.65
+                                    text: root.stateLabel[root.normalise(modelData.state)]
                                     font: Kirigami.Theme.smallFont
-                                    Layout.fillWidth: true
+                                    color: root.stateColour[root.normalise(modelData.state)]
                                 }
-                            }
-
-                            PlasmaComponents.Label {
-                                text: root.stateLabel[root.normalise(modelData.state)]
-                                font: Kirigami.Theme.smallFont
-                                color: root.stateColour[root.normalise(modelData.state)]
                             }
                         }
                     }
                 }
+            }
+
+            // Usage tracker section
+            UsageSection {
+                Layout.fillWidth: true
+                visible: root.usageSnapshot.available
             }
         }
     }
@@ -447,6 +627,171 @@ PlasmoidItem {
                 color: "#1e1e2e"
                 font.bold: true
             }
+        }
+    }
+
+    // Usage tracker section at bottom of full view
+    component UsageSection: ColumnLayout {
+        spacing: Kirigami.Units.smallSpacing
+
+        Kirigami.Separator { Layout.fillWidth: true }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Kirigami.Heading {
+                level: 5
+                text: i18n("Usage Tracker")
+                Layout.fillWidth: true
+            }
+        }
+
+        // Claude Section
+        ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing / 2
+            visible: usageSnapshot.sessionPct !== null || usageSnapshot.weeklyPct !== null
+
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents.Label { text: "Claude"; font.bold: true }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents.Label { text: "Session (5h)"; Layout.preferredWidth: Kirigami.Units.gridUnit * 6 }
+                PlasmaComponents.Label {
+                    text: usageSnapshot.sessionPct !== null ? usageSnapshot.sessionPct + "%" : "—"
+                    font.bold: true
+                    color: Usage.levelColor(usageSnapshot.sessionPct)
+                }
+                Item { Layout.fillWidth: true }
+                PlasmaComponents.Label {
+                    text: resetLabel(usageSnapshot.sessionResetsAt)
+                    opacity: 0.6
+                }
+            }
+            UsageBar {
+                Layout.fillWidth: true
+                percent: usageSnapshot.sessionPct
+                barColor: Usage.levelColor(usageSnapshot.sessionPct)
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents.Label { text: "Weekly (7d)"; Layout.preferredWidth: Kirigami.Units.gridUnit * 6 }
+                PlasmaComponents.Label {
+                    text: usageSnapshot.weeklyPct !== null ? usageSnapshot.weeklyPct + "%" : "—"
+                    font.bold: true
+                    color: Usage.weeklyLevelColor(usageSnapshot.weeklyPct)
+                }
+                Item { Layout.fillWidth: true }
+                PlasmaComponents.Label {
+                    text: resetLabel(usageSnapshot.weeklyResetsAt)
+                    opacity: 0.6
+                }
+            }
+            UsageBar {
+                Layout.fillWidth: true
+                percent: usageSnapshot.weeklyPct
+                barColor: Usage.weeklyLevelColor(usageSnapshot.weeklyPct)
+            }
+        }
+
+        // Antigravity (agy) Section
+        ColumnLayout {
+            spacing: Kirigami.Units.smallSpacing / 2
+            visible: usageSnapshot.agySessionPct !== null || usageSnapshot.agyWeeklyPct !== null
+
+            RowLayout {
+                Layout.fillWidth: true
+                PlasmaComponents.Label { text: "antigravity (agy)"; font.bold: true }
+            }
+
+            PlasmaComponents.Label {
+                Layout.fillWidth: true
+                visible: usageSnapshot.agyAgentState !== ""
+                text: "State: " + usageSnapshot.agyAgentState
+                opacity: 0.6
+                font: Kirigami.Theme.smallFont
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: usageSnapshot.agySessionPct !== null
+                PlasmaComponents.Label { text: "Gemini Weekly"; Layout.preferredWidth: Kirigami.Units.gridUnit * 6 }
+                PlasmaComponents.Label {
+                    text: usageSnapshot.agySessionPct + "%"
+                    font.bold: true
+                    color: Usage.agyLevelColor(usageSnapshot.agySessionPct)
+                }
+                Item { Layout.fillWidth: true }
+                PlasmaComponents.Label {
+                    text: resetLabel(usageSnapshot.agySessionResetsAt)
+                    opacity: 0.6
+                }
+            }
+            UsageBar {
+                Layout.fillWidth: true
+                visible: usageSnapshot.agySessionPct !== null
+                percent: usageSnapshot.agySessionPct
+                barColor: Usage.agyLevelColor(usageSnapshot.agySessionPct)
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                visible: usageSnapshot.agyWeeklyPct !== null
+                PlasmaComponents.Label { text: "3p Weekly"; Layout.preferredWidth: Kirigami.Units.gridUnit * 6 }
+                PlasmaComponents.Label {
+                    text: usageSnapshot.agyWeeklyPct + "%"
+                    font.bold: true
+                    color: Usage.agyWeeklyLevelColor(usageSnapshot.agyWeeklyPct)
+                }
+                Item { Layout.fillWidth: true }
+                PlasmaComponents.Label {
+                    text: resetLabel(usageSnapshot.agyWeeklyResetsAt)
+                    opacity: 0.6
+                }
+            }
+            UsageBar {
+                Layout.fillWidth: true
+                visible: usageSnapshot.agyWeeklyPct !== null
+                percent: usageSnapshot.agyWeeklyPct
+                barColor: Usage.agyWeeklyLevelColor(usageSnapshot.agyWeeklyPct)
+            }
+        }
+
+        // Last updated
+        PlasmaComponents.Label {
+            Layout.fillWidth: true
+            visible: usageSnapshot.receivedAt !== null
+            font: Kirigami.Theme.smallFont
+            opacity: 0.5
+            text: "Updated " + Usage.fmtDuration(Math.max(0, Math.round(nowTs - usageSnapshot.receivedAt))) + " ago"
+        }
+    }
+
+    // Simple usage bar component
+    component UsageBar: Item {
+        property var percent: null
+        property color barColor: "#585b70"
+        implicitHeight: 10
+
+        // Track and fill are siblings so the track's opacity doesn't dim the fill.
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: Kirigami.Theme.backgroundColor
+            border.color: Kirigami.Theme.highlightColor
+            border.width: 1
+            opacity: 0.2
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: (percent !== null) ? (parent.width * Math.max(0, Math.min(100, percent)) / 100) : 0
+            radius: height / 2
+            color: barColor
         }
     }
 
