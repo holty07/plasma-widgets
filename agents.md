@@ -12,7 +12,6 @@ Finding: All widgets currently target KDE Plasma 6.
 * `clickup-tasks/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `freellmapi-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `herdr-status/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
-* `orca-notifier/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 
 Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 APIs, Qt5 imports, or Plasma Shell 5 components. Build/test against Qt 6 / Kirigami 2 / Plasma 6.
 
@@ -68,35 +67,14 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 * Settings (`contents/config/main.xml`): herdr binary path, poll interval, hide idle, highlight when blocked.
 * Id `io.github.holty07.herdrstatus`. MIT licensed.
 
-### orca-notifier
-* Displays Orca agents: active, idle, waiting for input.
-* Id `io.github.holty07.orcanotifier`.
-* `X-Plasma-API` set to `declarativeappletscript`.
-* Sub-agents (2026-10-17): `orca worktree ps --json` does **not** return the
-  `subagents` roster Orca keeps internally (only `mainAgent`). So
-  `contents/code/subagents.py` reads `~/.config/orca/agent-hooks/last-status.json`
-  (paneKey → Claude `transcriptPath`) and each session's
-  `<session>/subagents/agent-*.jsonl` + `.meta.json`. A sub-agent is running until its
-  transcript contains Orca's `SubagentStop` hook attachment, or it hasn't been written
-  for 30 min (killed sub-agents never get the hook). Claude only; Codex sub-agents
-  aren't covered. Test with `python3 contents/code/subagents.py`.
-* Hermes (2026-10-20): `orca worktree ps` has no status row for Hermes. Its
-  `orca-status` hook events reach Orca (HTTP 204) but never become a status, so Hermes
-  never appears there. `orca terminal list` tags some panes `agentIdentity: hermes`, but
-  not the Hermes TUI pane. So `contents/code/hermes_panes.py` scans `/proc` for Hermes
-  processes (exe under `~/.hermes`/`$HERMES_HOME`, or a `hermes` launcher) and reads
-  their `ORCA_PANE_KEY`. State comes from the TUI title marker: `⚠` waiting, `⏳` busy,
-  `✓` idle (Hermes `ui-tui/src/app/useMainApp.ts`). Panes without a marker count as
-  running if they printed output in the last 10 s. Test with `python3 contents/code/hermes_panes.py`.
-
 ## This Machine (Findings 2026-10-14)
 
 * CachyOS, **plasmashell 6.7.5** (Qt 6), Wayland session, screen at 2x scale.
 * Widgets are installed in `~/.local/share/plasma/plasmoids/`. `agenda`,
   `clickup-tasks` and `freellmapi-usage` are **symlinks** into this repo, so edits are
   live after a shell restart. Do not run `kpackagetool6 -u` on those (it would
-  replace the symlink with a copy). `orca-notifier` and `claude-usage` are **copied**
-  installs: refresh them with `kpackagetool6 -t Plasma/Applet -u <widget dir>`.
+  replace the symlink with a copy). `claude-usage` is a **copied**
+  install: refresh it with `kpackagetool6 -t Plasma/Applet -u <widget dir>`.
 * The repo path contains a space (`Plasma Widgets`). Quote paths everywhere,
   including the commands QML hands to the `executable` DataSource (it runs them
   through a shell).
