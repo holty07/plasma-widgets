@@ -8,8 +8,10 @@ Finding: All widgets currently target KDE Plasma 6.
 
 * `agenda/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `antigravity-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
+* `cindy-chats/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `claude-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `clickup-tasks/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
+* `compact-media-player/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `freellmapi-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `herdr-status/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 
@@ -18,7 +20,7 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 ## Widget Findings
 
 ### freellmapi-usage
-* Modified recently. Contains Python fetcher `contents/code/freellmapi.py`.
+* Python fetcher `contents/code/freellmapi.py`.
 * Config via `~/.config/freellmapi-usage/config.json` with `session_token`.
 * Reads REST API `/api/analytics/*` and read-only SQLite `PRAGMA query_only`.
 * Detects model-catalog changes via `settings.catalog_applied_version` comparison, caches to `~/.cache/freellmapi-usage/catalog_version.json`.
@@ -63,18 +65,60 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
 * Id `io.github.holty07.antigravityusage`.
 
 ### herdr-status
-* Live herdr agent states in the panel; polls the `herdr` binary.
-* Settings (`contents/config/main.xml`): herdr binary path, poll interval, hide idle, highlight when blocked.
+* Live herdr agent states; polls the `herdr` binary. v2.0 (2026-11-20).
+* Panel: running (working, blue) / waiting (blocked, yellow) / idle dots. The idle
+  dot merges herdr's idle, done and unknown states. Desktop (Planar form factor):
+  full agent list.
+* Settings (`contents/config/main.xml`): herdr binary path, poll interval, hide idle
+  (default `false`), highlight when blocked.
+* `herdrBinary` defaults to plain `herdr`. Plasma's session PATH includes
+  `~/.local/bin`, so don't hardcode a home path (public repo).
 * Id `io.github.holty07.herdrstatus`. MIT licensed.
+
+### cindy-chats
+* Live Cindy chat states: working (blue) / waiting (yellow) / idle (green) dots in the
+  panel, chat list on the desktop, with a Claude Code and antigravity-cli usage
+  tracker below it.
+* Reads the Cindy SQLite database with `sqlite3 -json` (path set in the widget
+  config, `cindyDbPath`). Usage helpers in `contents/code/usage.js`; Claude usage
+  takes the freshest of Cindy's `account_usage_snapshots`, the Claude desktop app
+  cache and the claude-usage hook file. Own README lists every source.
+* Id `io.github.holty07.cindychats`.
+
+### compact-media-player
+* MPRIS now-playing controller with a cava visualiser. Moved into the repo
+  2026-11-20 from a local-only install; Id renamed from
+  `org.kde.plasma.compactmediaplayer` to `io.github.holty07.compactmediaplayer`.
+* Uses `org.kde.plasma.private.mpris` (`Mpris2Model`). Plasma's model always jumps
+  to the most recent player, so `pinPlayer` / `pinnedPlayer` steer `currentIndex`
+  back to one player, matched on desktop entry first, then identity.
+* The user's player is limusic. It registers `org.mpris.MediaPlayer2.limusic` with
+  identity `Limusic` and no `DesktopEntry`, so the pin is `Limusic`.
+* Visualiser: `support/` holds `cava-plasmoid-bridge` (keeps the newest cava frame at
+  `$XDG_RUNTIME_DIR/cava-plasmoid.raw`), its systemd user unit and the cava config.
+  `CavaSource.qml` reads the frame. Install steps are in the widget README.
 
 ## This Machine (Findings 2026-10-14)
 
 * CachyOS, **plasmashell 6.7.5** (Qt 6), Wayland session, screen at 2x scale.
-* Widgets are installed in `~/.local/share/plasma/plasmoids/`. `agenda`,
-  `clickup-tasks` and `freellmapi-usage` are **symlinks** into this repo, so edits are
+* Widgets are installed in `~/.local/share/plasma/plasmoids/` (checked 2026-11-20).
+  `agenda`, `antigravity-usage`, `clickup-tasks`, `compact-media-player`,
+  `freellmapi-usage` and `herdr-status` are **symlinks** into this repo, so edits are
   live after a shell restart. Do not run `kpackagetool6 -u` on those (it would
-  replace the symlink with a copy). `claude-usage` is a **copied**
-  install: refresh it with `kpackagetool6 -t Plasma/Applet -u <widget dir>`.
+  replace the symlink with a copy).
+* `claude-usage` and `cindy-chats` are **copied** installs: refresh them with
+  `kpackagetool6 -t Plasma/Applet -u <widget dir>`. `claude-usage` matches the repo.
+  **`cindy-chats` does not:** the installed `contents/ui/main.qml` (2026-10-30 09:43)
+  is newer than the repo's and has uncommitted work (waiting detection from the
+  latest `ask_user` / `plan_review` message, `sqlite3 -readonly`). Copy it back into
+  the repo before refreshing the install, or that work is lost.
+* Renaming a widget Id: stop `plasma-plasmashell.service`, change the `plugin=` line
+  in `~/.config/plasma-org.kde.plasma.desktop-appletsrc`, swap the install, then
+  start the service. Editing appletsrc while Plasma runs gets overwritten, and a
+  changed Id with no appletsrc update drops the widget off the panel.
+* To change one running widget's config without a restart, use the scripting API:
+  `qdbus6 org.kde.plasmashell /PlasmaShell org.kde.PlasmaShell.evaluateScript '…'`
+  with `widget.currentConfigGroup = ["General"]; widget.writeConfig(key, value)`.
 * The repo path contains a space (`Plasma Widgets`). Quote paths everywhere,
   including the commands QML hands to the `executable` DataSource (it runs them
   through a shell).
@@ -131,10 +175,14 @@ the logical widget geometry when cropping.
 * When creating or editing a widget, verify `metadata.json` includes:
   * `KPackageStructure`: `Plasma/Applet`
   * `X-Plasma-API-Minimum-Version`: `6.0`
-  * `X-Plasma-MainScript` points to existing `ui/main.qml`
+  * `X-Plasma-MainScript`, if set, points to an existing file. Plasma 6 defaults
+    to `ui/main.qml`, and several widgets here omit the key.
+  * `Id`: `io.github.holty07.<name>`; author `holty07`.
 * Keep widget-specific READMEs for install/config details. Keep this repo README high-level.
 * Record findings here in chronological sections under `## Widget Findings` or new `## Findings YYYY-MM-DD`.
 * Do not commit secrets. Config files use `config.example.json` templates.
+* The repo is public (github.com/holty07/plasma-widgets). No tokens, work email,
+  employer references or `/home/<user>` paths in committed files.
 * Test changes on Plasma 6 before marking complete.
 
 ## Findings 2026-10-28
@@ -142,7 +190,7 @@ the logical widget geometry when cropping.
 ### herdr-status idle count showing "…"
 * Root cause: `hideIdle` defaulted to `true` in `contents/config/main.xml`. With `hideIdle` true, the idle DotAndCount gets `available: false`, so the panel hides the dot and renders "…" instead of the idle count.
 * Fix: changed the `hideIdle` default to `false`. The user's `plasma-org.kde.plasma.desktop-appletsrc` sets no explicit `hideIdle` for any of the three herdrstatus applets, so all now fall back to the new default and show the idle count.
-* Synced the change to the installed copy at `~/.local/share/plasma/plasmoids/io.github.holty07.herdrstatus/contents/config/main.xml` (installed as a copy, not a symlink) and restarted `plasma-plasmashell.service` via systemd. No widget errors in the journal after restart.
+* Restarted `plasma-plasmashell.service` via systemd. No widget errors in the journal after restart.
 
 ## TODO for Agents
 * Validate all widgets load in Plasma 6 panel and desktop contexts.
@@ -150,4 +198,4 @@ the logical widget geometry when cropping.
 * Add CI notes for Plasma 6 version check if introduced.
 
 ---
-Last updated: 2026-10-14
+Last updated: 2026-11-20
