@@ -12,7 +12,6 @@ This folder contains multiple Plasma Applet projects, each in its own subdirecto
 |--------|------|----------|---------|
 | `agenda` | Agenda | Date and Time | Today's agenda from Google Calendar ICS feeds — Catppuccin Mocha |
 | `antigravity-usage` | Antigravity Usage | System Information | antigravity-cli weekly quota and context usage — pie in panel, full breakdown on desktop |
-| `cindy-chats` | Cindy Chats | System Information | Live Cindy chat states: dots in the panel, full list on the desktop, plus Claude Code and antigravity-cli usage |
 | `claude-usage` | Claude Usage | System Information | Claude Code session/weekly usage — pie in panel, full breakdown on desktop |
 | `clickup-tasks` | ClickUp Tasks | Utilities | ClickUp task lists: overdue/open/done counts, with task list on desktop |
 | `compact-media-player` | Compact Media Player | Multimedia | MPRIS now-playing controller with a cava visualiser; can pin to one player (e.g. limusic) |
@@ -40,7 +39,6 @@ See each widget's own README for config details.
 Plasma Widgets/
 ├─ agenda/
 ├─ antigravity-usage/
-├─ cindy-chats/
 ├─ claude-usage/
 ├─ clickup-tasks/
 ├─ compact-media-player/

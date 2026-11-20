@@ -8,7 +8,6 @@ Finding: All widgets currently target KDE Plasma 6.
 
 * `agenda/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `antigravity-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
-* `cindy-chats/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `claude-usage/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `clickup-tasks/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
 * `compact-media-player/metadata.json` → `X-Plasma-API-Minimum-Version: 6.0`
@@ -75,16 +74,6 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
   `~/.local/bin`, so don't hardcode a home path (public repo).
 * Id `io.github.holty07.herdrstatus`. MIT licensed.
 
-### cindy-chats
-* Live Cindy chat states: working (blue) / waiting (yellow) / idle (green) dots in the
-  panel, chat list on the desktop, with a Claude Code and antigravity-cli usage
-  tracker below it.
-* Reads the Cindy SQLite database with `sqlite3 -json` (path set in the widget
-  config, `cindyDbPath`). Usage helpers in `contents/code/usage.js`; Claude usage
-  takes the freshest of Cindy's `account_usage_snapshots`, the Claude desktop app
-  cache and the claude-usage hook file. Own README lists every source.
-* Id `io.github.holty07.cindychats`.
-
 ### compact-media-player
 * MPRIS now-playing controller with a cava visualiser. Moved into the repo
   2026-11-20 from a local-only install; Id renamed from
@@ -106,12 +95,8 @@ Implication: Ensure built widgets will work on Plasma 6. Do not use Plasma 5 API
   `freellmapi-usage` and `herdr-status` are **symlinks** into this repo, so edits are
   live after a shell restart. Do not run `kpackagetool6 -u` on those (it would
   replace the symlink with a copy).
-* `claude-usage` and `cindy-chats` are **copied** installs: refresh them with
-  `kpackagetool6 -t Plasma/Applet -u <widget dir>`. `claude-usage` matches the repo.
-  **`cindy-chats` does not:** the installed `contents/ui/main.qml` (2026-10-30 09:43)
-  is newer than the repo's and has uncommitted work (waiting detection from the
-  latest `ask_user` / `plan_review` message, `sqlite3 -readonly`). Copy it back into
-  the repo before refreshing the install, or that work is lost.
+* `claude-usage` is a **copied** install (matches the repo as of 2026-11-20): refresh
+  it with `kpackagetool6 -t Plasma/Applet -u <widget dir>`.
 * Renaming a widget Id: stop `plasma-plasmashell.service`, change the `plugin=` line
   in `~/.config/plasma-org.kde.plasma.desktop-appletsrc`, swap the install, then
   start the service. Editing appletsrc while Plasma runs gets overwritten, and a
