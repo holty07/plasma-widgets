@@ -33,29 +33,20 @@ PlasmoidItem {
     readonly property bool isTyping: nowTs < _typingUntil
     readonly property bool isThinking: codeActive && !isTyping
 
-    // Four sources, read in parallel and combined once all have reported back.
+    // Three sources, read in parallel and combined once all have reported back.
     // The 5h/7d limits are one account-wide pool, so whichever source saw
     // them most recently wins:
-    //   1. Cindy's DB (account_usage_snapshots) - refreshed on every Claude
-    //      turn Cindy runs. Cindy doesn't fire the statusLine hook.
-    //   2. plasma-usage-status.json - our Claude Code statusLine hook. Only
+    //   1. plasma-usage-status.json - our Claude Code statusLine hook. Only
     //      present if installed and the Code CLI has run. If reasonably fresh
     //      (<6h) its cost/context/model detail is merged in on top of
     //      whichever snapshot wins.
-    //   3. ~/.claude.json cachedUsageUtilization - Claude Code's own cache.
-    //   4. plan-usage-history.json - the desktop app's rolling usage cache,
+    //   2. ~/.claude.json cachedUsageUtilization - Claude Code's own cache.
+    //   3. plan-usage-history.json - the desktop app's rolling usage cache,
     //      only updated while the desktop app runs.
     property var _appSnap: null
     property var _hookSnap: null
     property var _claudeJsonSnap: null
-    property var _cindySnap: null
     property int _pending: 0
-
-    // Newest Cindy account DB; there is one cindy-<account>.db per signed-in account.
-    readonly property string cindyCommand:
-        "db=$(ls -t ~/.config/CindyGlobal/cindy-*.db 2>/dev/null | head -n 1); "
-        + "[ -n \"$db\" ] && sqlite3 -readonly -json \"$db\" "
-        + "\"SELECT snapshot FROM account_usage_snapshots WHERE agent_kind = 'claude-code';\" 2>/dev/null"
 
     // Shell out to `cat` rather than reading file:// URLs from QML directly —
     // sidesteps any QML-engine/module quirks around local file access entirely.
@@ -95,28 +86,14 @@ PlasmoidItem {
         }
     }
 
-    Plasma5Support.DataSource {
-        id: cindyUsage
-        engine: "executable"
-        connectedSources: []
-        onNewData: function (sourceName, data) {
-            disconnectSource(sourceName)
-            var text = (data && data["stdout"]) ? data["stdout"] : ""
-            root._cindySnap = text ? Usage.fromCindyDb(text) : null
-            root._maybeCombine()
-        }
-    }
-
     function refresh() {
         _appSnap = null
         _hookSnap = null
         _claudeJsonSnap = null
-        _cindySnap = null
-        _pending = 4
+        _pending = 3
         catAppUsage.connectSource("cat ~/.config/Claude/plan-usage-history.json 2>/dev/null")
         catHook.connectSource("cat ~/.claude/plasma-usage-status.json 2>/dev/null")
         catClaudeJson.connectSource("cat ~/.claude.json 2>/dev/null")
-        cindyUsage.connectSource(root.cindyCommand)
     }
 
     function _maybeCombine() {
@@ -136,7 +113,7 @@ PlasmoidItem {
             _lastHookReceivedAt = _hookSnap.receivedAt
         }
 
-        var snaps = [_cindySnap, _hookSnap, _claudeJsonSnap, _appSnap].filter(function (s) {
+        var snaps = [_hookSnap, _claudeJsonSnap, _appSnap].filter(function (s) {
             return s && s.available
         })
         snaps.sort(function (a, b) { return (b.receivedAt || 0) - (a.receivedAt || 0) })
@@ -430,7 +407,6 @@ PlasmoidItem {
                     if (root.snapshot.receivedAt === null) return ""
                     var ago = Math.max(0, Math.round(root.nowTs - root.snapshot.receivedAt))
                     var src = ({
-                        "cindy": " via Cindy",
                         "hook": " via Claude Code",
                         "claude-json": " via Claude Code cache",
                         "app-cache": " via Claude desktop app"
