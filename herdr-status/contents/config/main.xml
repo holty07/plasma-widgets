@@ -17,7 +17,7 @@
         </entry>
         <entry name="hideIdle" type="Bool">
             <label>Hide the idle count in the panel</label>
-            <default>true</default>
+            <default>false</default>
         </entry>
         <entry name="attentionOnBlocked" type="Bool">
             <label>Highlight the panel icon when an agent is blocked</label>
