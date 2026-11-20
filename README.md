@@ -13,9 +13,10 @@ This folder contains multiple Plasma Applet projects, each in its own subdirecto
 | `antigravity-usage` | Antigravity Usage | System Information | antigravity-cli weekly quota and context usage — pie in panel, full breakdown on desktop |
 | `agenda` | Agenda | Date and Time | Today's agenda from Google Calendar ICS feeds — Catppuccin Mocha |
 | `claude-usage` | Claude Usage | System Information | Claude Code session/weekly usage — pie in panel, full breakdown on desktop |
+| `compact-media-player` | Compact Media Player | Multimedia | MPRIS now-playing controller with a cava visualiser; can pin to one player (e.g. limusic) |
 | `clickup-tasks` | ClickUp Tasks | Utilities | ClickUp task lists: overdue/open/done counts, with task list on desktop |
 | `freellmapi-usage` | FreeLLMAPI Usage | System Information | Tracks freellmapi usage: requests, tokens, latency, cost savings by model/platform, with model-catalog change detection |
-| `herdr-status` | Herdr Status | System Information | Live herdr agent states in the panel |
+| `herdr-status` | Herdr Status | System Information | Live herdr agent states: working / blocked / idle dots in the panel, full agent list on the desktop (orca-style) |
 | `orca-notifier` | Orca Notifier | System Information | Displays current Orca agents: active, idle, and waiting for input |
 
 ## Plasma 6 Compatibility
@@ -41,6 +42,7 @@ Plasma Widgets/
 ├─ antigravity-usage/
 ├─ claude-usage/
 ├─ clickup-tasks/
+├─ compact-media-player/
 ├─ freellmapi-usage/
 ├─ herdr-status/
 ├─ orca-notifier/

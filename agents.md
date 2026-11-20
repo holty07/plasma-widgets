@@ -142,7 +142,7 @@ journalctl --user -u plasma-plasmashell --since "-1min" --no-pager \
   | grep -iE '<widget-id or folder>|TypeError|ReferenceError'
 ```
 
-Existing noise you can ignore: binding loops in `org.kde.plasma.compactmediaplayer`
+Existing noise you can ignore: binding loops in `io.github.holty07.compactmediaplayer`
 and "unknown wallpaper provider type".
 
 **Screenshots:** `spectacle -b -n -f -o <file>`. The screen is at 2x scale, so double
@@ -158,6 +158,13 @@ the logical widget geometry when cropping.
 * Record findings here in chronological sections under `## Widget Findings` or new `## Findings YYYY-MM-DD`.
 * Do not commit secrets. Config files use `config.example.json` templates.
 * Test changes on Plasma 6 before marking complete.
+
+## Findings 2026-10-28
+
+### herdr-status idle count showing "…"
+* Root cause: `hideIdle` defaulted to `true` in `contents/config/main.xml`. With `hideIdle` true, the idle DotAndCount gets `available: false`, so the panel hides the dot and renders "…" instead of the idle count.
+* Fix: changed the `hideIdle` default to `false`. The user's `plasma-org.kde.plasma.desktop-appletsrc` sets no explicit `hideIdle` for any of the three herdrstatus applets, so all now fall back to the new default and show the idle count.
+* Synced the change to the installed copy at `~/.local/share/plasma/plasmoids/io.github.holty07.herdrstatus/contents/config/main.xml` (installed as a copy, not a symlink) and restarted `plasma-plasmashell.service` via systemd. No widget errors in the journal after restart.
 
 ## TODO for Agents
 * Validate all widgets load in Plasma 6 panel and desktop contexts.
