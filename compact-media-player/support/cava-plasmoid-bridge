@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""
+cava-plasmoid-bridge
+
+Runs cava with raw ASCII output and keeps exactly one frame on disk at
+$XDG_RUNTIME_DIR/cava-plasmoid.raw, replaced atomically so the widget always
+reads a whole frame.
+
+Stdlib only. Nothing to install beyond cava itself.
+"""
+
+import os
+import signal
+import subprocess
+import sys
+
+RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or "/tmp"
+OUT_PATH = os.path.join(RUNTIME, "cava-plasmoid.raw")
+TMP_PATH = OUT_PATH + ".tmp"
+CONFIG = os.environ.get(
+    "CAVA_PLASMOID_CONFIG",
+    os.path.expanduser("~/.config/cava/plasmoid.conf"),
+)
+
+proc = None
+
+
+def write_frame(frame: bytes) -> None:
+    fd = os.open(TMP_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, frame)
+    finally:
+        os.close(fd)
+    os.replace(TMP_PATH, OUT_PATH)
+
+
+def silence() -> None:
+    """Leave a zeroed frame behind so the widget settles instead of freezing."""
+    try:
+        write_frame(b"0;" * 32)
+    except OSError:
+        pass
+
+
+def shutdown(*_args) -> None:
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    silence()
+    sys.exit(0)
+
+
+def main() -> int:
+    global proc
+
+    if not os.path.exists(CONFIG):
+        print(f"cava config not found: {CONFIG}", file=sys.stderr)
+        return 1
+
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+
+    proc = subprocess.Popen(
+        ["cava", "-p", CONFIG],
+        stdout=subprocess.PIPE,
+        bufsize=0,
+    )
+
+    buf = b""
+    while True:
+        chunk = proc.stdout.read(4096)
+        if not chunk:
+            break
+        buf += chunk
+
+        # Keep only the newest complete frame; drop anything we fell behind on.
+        end = buf.rfind(b"\n")
+        if end == -1:
+            if len(buf) > 65536:
+                buf = b""
+            continue
+
+        start = buf.rfind(b"\n", 0, end)
+        frame = buf[start + 1:end]
+        buf = buf[end + 1:]
+
+        if frame:
+            try:
+                write_frame(frame)
+            except OSError as exc:
+                print(f"write failed: {exc}", file=sys.stderr)
+
+    silence()
+    return proc.wait()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

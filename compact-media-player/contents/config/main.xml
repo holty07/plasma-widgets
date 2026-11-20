@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+                          http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <entry name="pinPlayer" type="Bool">
+      <label>Follow only one MPRIS player instead of the most recent</label>
+      <default>false</default>
+    </entry>
+    <entry name="pinnedPlayer" type="String">
+      <label>Desktop entry or identity of the player to follow</label>
+      <default></default>
+    </entry>
+    <entry name="visualiserMode" type="String">
+      <label>Where the cava bars are drawn: background, strip or off</label>
+      <default>strip</default>
+    </entry>
+    <entry name="barThickness" type="Int">
+      <default>4</default>
+    </entry>
+    <entry name="barGap" type="Int">
+      <default>2</default>
+    </entry>
+    <entry name="framerate" type="Int">
+      <label>Polls per second for the visualiser</label>
+      <default>20</default>
+    </entry>
+    <entry name="mirrorBars" type="Bool">
+      <default>false</default>
+    </entry>
+    <entry name="useAlbumColours" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="showBackdrop" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="backdropOpacity" type="Int">
+      <default>30</default>
+    </entry>
+    <entry name="textScale" type="Int">
+      <label>Percentage multiplier applied to the derived font sizes</label>
+      <default>100</default>
+    </entry>
+    <entry name="showAlbum" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="showTimes" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="scrollTitle" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="volumeOnWheel" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="autoManageCava" type="Bool">
+      <default>true</default>
+    </entry>
+    <entry name="cavaService" type="String">
+      <default>cava-plasmoid.service</default>
+    </entry>
+  </group>
+</kcfg>

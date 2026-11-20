@@ -1,0 +1,14 @@
+[Unit]
+Description=cava bridge for the Compact Media Player plasmoid
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cava-plasmoid-bridge
+Restart=on-failure
+RestartSec=2
+Nice=5
+Slice=session.slice
+
+[Install]
+WantedBy=graphical-session.target
